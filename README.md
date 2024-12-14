@@ -2,32 +2,21 @@
 This repository contains a Python-based application for running customized multi-block psychophysical experiments. The experiments are designed to measure sensory processing and reaction times under various audiovisual conditions. The application provides a GUI for configuring experiments and supports data collection and integration with REDCap for data management.
 
 <!-- ![Main Interface](path/to/main_interface_image.png) -->
-Table of Contents
-Features
-Prerequisites
-Installation
-Usage
-Launching the Experiment Configuration GUI
-Configuring Experiments
-Participant Information
-Audiovisual Synchrony Correction
-Blocks Configuration
-Estimated Experiment Time
-Saving and Loading Configurations
-Running Experiments
-Data Management
-Local Data Saving
-Uploading Data to REDCap
-Experiment Types
-SJ (Simultaneity Judgment)
-SRT (Simple Reaction Time)
-SRT_Mod (Modified Simple Reaction Time)
-SJ_Mod (Modified Simultaneity Judgment)
-Customization
-Troubleshooting
-Contributing
-License
-Features
+## Table of Contents
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Usage](#usage)
+  - [Launching the GUI](#launching-the-gui)
+  - [Configuring Experiments](#configuring-experiments)
+  - [Running Experiments](#running-experiments)
+- [Data Management](#data-management)
+- [Experiment Types](#experiment-types)
+- [Customization](#customization)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
+
 Experiment Configuration GUI: Easily configure participant information and experiment blocks without editing code.
 Multi-Block Support: Run a series of experiments with different configurations in a single session.
 Data Integration with REDCap: Automatically upload collected data to REDCap for centralized management.
