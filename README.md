@@ -1,1 +1,1 @@
-# Python_Simple_MSI_Suite
+# Python MSI Suite
