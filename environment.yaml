@@ -1,0 +1,11 @@
+
+name: psychopy
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.8
+  - pip
+  - psychopy
+  - pip:
+    - pycap>=2.0.0  # REDCap API package
