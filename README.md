@@ -27,6 +27,7 @@ Support for Various Experiment Types: Including Simultaneity Judgment (SJ), Simp
 
 ## Prerequisites
 
+- Anaconda or Miniconda (for conda environment management)
 - Python 3.6 or higher
 - PsychoPy: For running the experiments.
 - PyQt5: For the GUI application.
@@ -46,16 +47,42 @@ Support for Various Experiment Types: Including Simultaneity Judgment (SJ), Simp
 
 1. **Clone the Repository**
 
-2. **Create a Virtual Environment (Optional but Recommended)**
+   ```bash
+   git clone https://github.com/yourusername/Python-MSI-Suite.git
+   cd Python-MSI-Suite
+   ```
 
-3. **Install Required Packages**
+2. **Create and Activate a Conda Environment Using the Provided YAML File**
 
-<!-- If there's no `requirements.txt`, list the packages manually. -->
-Configure REDCap API Credentials
+   ```bash
+   conda env create -f environment.yaml
+   conda activate python-suite
+   ```
 
-Create a file named api_text.txt in the root directory.
+   This command creates a new conda environment named `python-suite` with all the required packages specified in `environment.yaml`.
+
+3. **(Optional) Install Additional Packages**
+
+   If you need to install additional packages or face issues with the provided environment, you can install required packages manually.
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+   *(Note: Ensure that you are in the `python-suite` environment when running this command.)*
+
+Configure REDCap API Credentials *(Optional)*
+
+If you wish to integrate with REDCap, create a file named `api_text.txt` in the root directory.
 
 Add the following lines with your REDCap API URL and token:
+
+```text
+api_url=https://your_redcap_url/api/
+api_token=your_api_token_here
+```
+
+**Note:** If you do not provide REDCap API credentials, you can still run the program offline. The data will be saved locally without being uploaded to REDCap.
 
 <!-- ![API Credentials Setup](path/to/api_credentials_image.png) -->
 ## Usage
@@ -104,9 +131,10 @@ Note: Ensure your system volume is appropriate, and the participant is ready bef
 Data collected during the experiments are saved locally in CSV format.
 Filenames include participant ID, age, gender, site, and a timestamp for easy identification.
 Example filename: data_001_25_m_vandy_20231115_123456.csv
-### Uploading Data to REDCap
-Collected data are automatically uploaded to REDCap using the provided API credentials.
+### Uploading Data to REDCap *(Optional)*
+If REDCap API credentials are provided, collected data are automatically uploaded to REDCap using the provided API credentials.
 Demographic data and experimental results are stored as separate records for better organization.
+**If no REDCap API URL or API token is provided, the program will run offline and save the data locally without attempting to upload to REDCap.**
 ## Experiment Types
 ### SJ (Simultaneity Judgment)
 Participants judge whether audio and visual stimuli occur simultaneously.

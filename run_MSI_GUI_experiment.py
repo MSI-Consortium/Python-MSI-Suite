@@ -17,41 +17,45 @@ from psychopy import prefs
 prefs.hardware['audioLib'] = ['PTB']  # Set PTB as preferred audio engine
 import numpy as np
 import redcap
+import subprocess  # Add this import at the top
 
 def load_api_credentials(filename="api_text.txt"):
-    """Load API URL and token from file. Raises an error if not found or incomplete."""
+    """Load API URL and token from file. Returns None if not found or incomplete."""
     api_url = None
     api_token = None
 
     if os.path.exists(filename):
         with open(filename, 'r') as file:
             for line in file:
-                key, value = line.strip().split('=')
-                if key == 'api_url':
-                    api_url = value
-                elif key == 'api_token':
-                    api_token = value
+                key_value = line.strip().split('=')
+                if len(key_value) == 2:
+                    key, value = key_value
+                    if key == 'api_url':
+                        api_url = value
+                    elif key == 'api_token':
+                        api_token = value
 
-    # Ensure both values are loaded; raise error if missing
     if not api_url or not api_token:
-        raise ValueError("API credentials are missing or incomplete. Please set them in experiment_config_gui.")
+        print("API credentials not found or incomplete. REDCap upload will be skipped.")
+        return None, None
 
     return api_url, api_token
 
 # Load API credentials
 api_url, api_token = load_api_credentials()
 
-# Initialize REDCap project
-project = redcap.Project(api_url, api_token)
-
-# After initializing the project
-try:
-    print("\nVerifying REDCap connection...")
-    project_info = project.export_project_info()
-    print(f"Connected to REDCap project: {project_info}")
-except Exception as e:
-    print(f"Error connecting to REDCap: {e}")
-
+# Initialize REDCap project if credentials are available
+if api_url and api_token:
+    project = redcap.Project(api_url, api_token)
+    try:
+        print("\nVerifying REDCap connection...")
+        project_info = project.export_project_info()
+        print(f"Connected to REDCap project: {project_info['project_title']}")
+    except Exception as e:
+        print(f"Error connecting to REDCap: {e}")
+        project = None
+else:
+    project = None
 
 # Detect operating system
 RUNNING_ON_MAC = platform.system() == 'Darwin'
@@ -81,7 +85,7 @@ def load_config(config_file):
         return json.load(f)
 
 def save_demographic_data(config):
-    """Save demographic data to CSV and create REDCap record"""
+    """Save demographic data to CSV and create REDCap record if possible."""
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d")
     demo_filename = f"demographic_data_{config['participant_id']}_{timestamp}.csv"
@@ -92,22 +96,25 @@ def save_demographic_data(config):
         writer.writerow(['record_id', 'age', 'gender'])
         writer.writerow([config['participant_id'], config['age'], config['gender']])
     
-    # Create REDCap record with just record_id and demographic file
-    record = {
-        'record_id': config['participant_id'],
-        'demographic_data_file': open(demo_filename, 'rb')
-    }
-    
-    try:
-        response = project.import_records([record])
-        print(f"Created REDCap record_id and uploaded demographic data: {config['participant_id']}")
-        return demo_filename
-    except Exception as e:
-        print(f"Error creating REDCap record: {e}")
-        raise
-    finally:
-        if 'record' in locals() and hasattr(record['demographic_data_file'], 'close'):
-            record['demographic_data_file'].close()
+    if project:
+        # Create REDCap record
+        record = {
+            'record_id': config['participant_id'],
+            'demographic_data_file': open(demo_filename, 'rb')
+        }
+        try:
+            response = project.import_records([record])
+            print(f"Uploaded demographic data to REDCap for participant: {config['participant_id']}")
+        except Exception as e:
+            print(f"Error uploading to REDCap: {e}")
+            raise
+        finally:
+            if 'record' in locals() and hasattr(record['demographic_data_file'], 'close'):
+                record['demographic_data_file'].close()
+    else:
+        print("REDCap project not initialized. Skipping REDCap upload.")
+
+    return demo_filename
 
 # Replace existing config loading code with:
 if len(sys.argv) < 2:
@@ -169,17 +176,30 @@ def verify_visual_timing(win, target_dur):
 def create_sound(filename, duration):
     """Create and configure a sound stimulus"""
     try:
-        sound_stim = sound.Sound(filename, secs=duration)
+        filepath = os.path.join(os.path.dirname(__file__), filename)
+        sound_stim = sound.Sound(filepath, secs=duration)
         sound_stim.setVolume(1.0)
         return sound_stim
     except Exception as e:
-        print(f"Error loading sound file {filename}: {e}")
-        sys.exit(1)
+        print(f"Error loading sound file {filepath}: {e}")
+        print("Attempting to create sound files using sound_creator.py")
+        subprocess.call(["python", "sound_creator.py"])
+        # Try to load the sound again
+        try:
+            sound_stim = sound.Sound(filepath, secs=duration)
+            sound_stim.setVolume(1.0)
+            return sound_stim
+        except Exception as e:
+            print(f"Failed to create or load sound file {filepath}: {e}")
+            sys.exit(1)
 
 def cleanup():
     """Clean up resources properly"""
     try:
-        sound.stopAllSounds()
+        # Stop any playing sounds by stopping individual sound objects
+        # If you have multiple sound objects, stop them individually
+        # Example:
+        # sound_stim.stop()
         win.close()
     finally:
         core.quit()
@@ -1018,19 +1038,14 @@ def run_experiment_series(config):
             print(f"Block {i} complete")
             
             # Upload data after each block
-            print("\nInitiating REDCap upload...")
-            if os.path.exists(data_filename):
-                print(f"Found data file: {data_filename}")
-                try:
-                    upload_success = upload_csv_to_redcap(data_filename)
-                    if upload_success:
-                        print("REDCap upload confirmed successful")
-                    else:
-                        print("REDCap upload failed")
-                except Exception as e:
-                    print(f"Error during REDCap upload attempt: {e}")
+            if project:
+                print("\nInitiating REDCap upload...")
+                if os.path.exists(data_filename):
+                    upload_csv_to_redcap(data_filename)
+                else:
+                    print(f"Data file {data_filename} not found.")
             else:
-                print(f"Data file not found: {data_filename}")
+                print("REDCap project not initialized. Skipping REDCap upload.")
 
             # Short break between blocks
             if block != config['blocks'][-1]:
@@ -1053,7 +1068,7 @@ def run_experiment_series(config):
         
         # Final upload to ensure everything is saved
         print("Performing final data upload...")
-        if os.path.exists(data_filename):
+        if project and os.path.exists(data_filename):
             upload_success = upload_csv_to_redcap(data_filename)
             if upload_success:
                 print("Final data upload successful")
@@ -1067,7 +1082,9 @@ def run_experiment_series(config):
         raise
     finally:
         print("Cleaning up experiment resources...")
-        sound.stopAllSounds()
+        # Stop individual sounds if necessary
+        # Example:
+        # sound_stim.stop()
         win.close()
         core.quit()
 
@@ -1114,44 +1131,49 @@ def present_visual_stimulus(visual_stim, duration_frames):
     return True
 
 def upload_csv_to_redcap(csv_filename):
-    """Upload CSV file to REDCap as a file attachment."""
-    try:
-        print(f"\nAttempting to upload {csv_filename} to REDCap...")
-        print(f"Using record_id: {config['participant_id']}")
-        
-        # Create a record with the file
-        record = {
-            'record_id': config['participant_id'],
-            'python_data_file': open(csv_filename, 'rb')
-        }
-
-        print("Record created, attempting import...")
+    """Upload CSV file to REDCap as a file attachment if project is available."""
+    if project:
         try:
-            response = project.import_records([record])
-            print(f"Raw REDCap response: {response}")
+            print(f"\nAttempting to upload {csv_filename} to REDCap...")
+            print(f"Using record_id: {config['participant_id']}")
             
-            if response and response.get('count') == 1:
-                print(f"Successfully uploaded {csv_filename} to REDCap")
-                return True
-            else:
-                print(f"Upload failed - unexpected response: {response}")
+            # Create a record with the file
+            record = {
+                'record_id': config['participant_id'],
+                'python_data_file': open(csv_filename, 'rb')
+            }
+
+            print("Record created, attempting import...")
+            try:
+                response = project.import_records([record])
+                print(f"Raw REDCap response: {response}")
+                
+                if response and response.get('count') == 1:
+                    print(f"Successfully uploaded {csv_filename} to REDCap")
+                    return True
+                else:
+                    print(f"Upload failed - unexpected response: {response}")
+                    return False
+                    
+            except redcap.RedcapError as e:
+                print(f"REDCap API error: {str(e)}")
                 return False
                 
-        except redcap.RedcapError as e:
-            print(f"REDCap API error: {str(e)}")
+        except Exception as e:
+            print(f"Error during upload: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(traceback.format_exc())
             return False
-            
-    except Exception as e:
-        print(f"Error during upload: {str(e)}")
-        print(f"Error type: {type(e)}")
-        import traceback
-        print(traceback.format_exc())
+        finally:
+            # Ensure file is closed
+            if 'record' in locals() and hasattr(record['python_data_file'], 'close'):
+                record['python_data_file'].close()
+                print("File handle closed")
+    else:
+        print("REDCap project not initialized. Skipping REDCap upload.")
         return False
-    finally:
-        # Ensure file is closed
-        if 'record' in locals() and hasattr(record['python_data_file'], 'close'):
-            record['python_data_file'].close()
-            print("File handle closed")
+
 # Use in run_experiment_series:
 if __name__ == "__main__":
     try:
@@ -1159,3 +1181,26 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error during experiment: {e}")
         cleanup()
+
+# Check for required sound files at the start
+def check_sound_files():
+    required_files = ["tone.wav", "high_pitch.wav", "low_pitch.wav"]
+    missing_files = []
+    for filename in required_files:
+        filepath = os.path.join(os.path.dirname(__file__), filename)
+        if not os.path.exists(filepath):
+            missing_files.append(filename)
+    if missing_files:
+        print(f"Missing sound files: {', '.join(missing_files)}")
+        print("Launching sound_creator.py to generate missing sound files.")
+        # Run sound_creator.py
+        subprocess.call(["python", "sound_creator.py"])
+        # After sound_creator.py exits, check again
+        for filename in missing_files:
+            filepath = os.path.join(os.path.dirname(__file__), filename)
+            if not os.path.exists(filepath):
+                print(f"Error: Sound file {filename} was not created.")
+                sys.exit(1)
+
+# Call the function before running the experiment
+check_sound_files()

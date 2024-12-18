@@ -403,7 +403,7 @@ class ExperimentConfigApp(QWidget):
             msg.exec_()
 
             # Start the experiment in a separate process
-            subprocess.Popen([sys.executable, 'test_run_MSI_GUI_experiment.py', self.last_saved_file])
+            subprocess.Popen([sys.executable, 'run_MSI_GUI_experiment.py', self.last_saved_file])
 
             # Close the configuration app
             self.close()
