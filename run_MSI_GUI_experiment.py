@@ -242,9 +242,16 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     
     # Calculate timing parameters
     visual_dur_sec = VISUAL_STIM_DURATION
-    frames_per_stim = max(1, int(visual_dur_sec * actual_fps))
+    if actual_fps is None:
+        assumed_fps = 60.0  # Assume 60Hz if actual_fps is None
+        frames_per_stim = max(1, int(visual_dur_sec * assumed_fps))
+        print(f"Using assumed refresh rate: {assumed_fps}Hz")
+    else:
+        frames_per_stim = max(1, int(visual_dur_sec * actual_fps))
+        print(f"Using refresh rate: {actual_fps}Hz")
     soa_sec = adjusted_soa / 1000.0
-    
+    print(f"Frames per stimulus: {frames_per_stim}")
+
     # For timing precision, schedule the second stimulus relative to the first
     if adjusted_soa <= 0:  # Audio first or simultaneous
         # Play audio
