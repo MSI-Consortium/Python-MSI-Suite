@@ -28,7 +28,7 @@ Support for Various Experiment Types: Including Simultaneity Judgment (SJ), Simp
 ## Prerequisites
 
 - Anaconda or Miniconda (for conda environment management)
-- Python 3.6 or higher
+- Python 3.10 or higher
 - PsychoPy: For running the experiments.
 - PyQt5: For the GUI application.
 - Redcap: Python module for interacting with REDCap API.
