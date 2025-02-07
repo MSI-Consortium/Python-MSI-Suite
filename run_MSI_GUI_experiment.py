@@ -97,20 +97,33 @@ def save_demographic_data(config):
         writer.writerow([config['participant_id'], config['age'], config['gender']])
     
     if project:
-        # Create REDCap record
-        record = {
-            'record_id': config['participant_id'],
-            'demographic_data_file': open(demo_filename, 'rb')
-        }
         try:
-            response = project.import_records([record])
-            print(f"Uploaded demographic data to REDCap for participant: {config['participant_id']}")
+            # First create/update just the record_id
+            data = {
+                'record_id': config['participant_id']
+            }
+            
+            # Import just the record_id
+            response = project.import_records([data])
+            print(f"Created/Updated record for participant: {config['participant_id']}")
+            
+            # Now upload the CSV file as an attachment
+            try:
+                with open(demo_filename, 'rb') as file:
+                    file_content = file.read()
+                    response = project.import_file(
+                        record=config['participant_id'],
+                        field='demographic_data_file',
+                        fname=demo_filename,
+                        fobj=file_content
+                    )
+                print(f"Uploaded demographic CSV file for participant: {config['participant_id']}")
+            except Exception as e:
+                print(f"Error uploading demographic file: {e}")
+                # Continue execution even if file upload fails
         except Exception as e:
-            print(f"Error uploading to REDCap: {e}")
-            raise
-        finally:
-            if 'record' in locals() and hasattr(record['demographic_data_file'], 'close'):
-                record['demographic_data_file'].close()
+            print(f"Error creating REDCap record: {e}")
+            # Continue execution even if REDCap upload fails
     else:
         print("REDCap project not initialized. Skipping REDCap upload.")
 
