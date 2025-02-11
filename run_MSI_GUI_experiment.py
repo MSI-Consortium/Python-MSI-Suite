@@ -14,7 +14,16 @@ import sys
 from datetime import datetime
 from psychopy import visual, core, event, monitors, sound
 from psychopy import prefs
-prefs.hardware['audioLib'] = ['PTB']  # Set PTB as preferred audio engine
+
+# Configure audio settings before importing sound - using only PTB for reliability
+prefs.hardware['audioLib'] = ['PTB']  # Using only PTB (PsychToolbox) as it's most reliable
+prefs.general['audioDevice'] = 'default'  # Use system default audio device
+
+print("\nAudio Configuration:")
+print(f"Selected Audio Library: {sound.audioLib}")
+print(f"Audio Device: {prefs.general['audioDevice']}")
+sound.init()  # Explicitly initialize sound system
+
 import numpy as np
 import redcap
 import subprocess  # Add this import at the top
@@ -187,24 +196,50 @@ def verify_visual_timing(win, target_dur):
     return abs(win.lastFrameT - target_dur) < 0.001  # 1ms tolerance
 
 def create_sound(filename, duration):
-    """Create and configure a sound stimulus"""
+    """Create and configure a sound stimulus with improved error handling"""
     try:
         filepath = os.path.join(os.path.dirname(__file__), filename)
-        sound_stim = sound.Sound(filepath, secs=duration)
-        sound_stim.setVolume(1.0)
-        return sound_stim
-    except Exception as e:
-        print(f"Error loading sound file {filepath}: {e}")
-        print("Attempting to create sound files using sound_creator.py")
-        subprocess.call(["python", "sound_creator.py"])
-        # Try to load the sound again
+        print(f"\nAttempting to create sound: {filepath}")
+        print(f"Using audio library: {sound.audioLib}")
+        
+        # Create sound with PTB backend
         try:
             sound_stim = sound.Sound(filepath, secs=duration)
-            sound_stim.setVolume(1.0)
+            sound_stim.setVolume(0.8)  # Set to 80% volume for safety
+            
+            # Test the sound
+            print("Testing sound playback...")
+            sound_stim.play()
+            core.wait(0.1)  # Wait briefly
+            sound_stim.stop()
+            print("Sound test complete")
+            
             return sound_stim
         except Exception as e:
-            print(f"Failed to create or load sound file {filepath}: {e}")
-            sys.exit(1)
+            print(f"Error creating sound: {e}")
+            print("Sound system details:")
+            print(f"Audio library: {sound.audioLib}")
+            if os.path.exists(filepath):
+                print(f"Sound file exists at {filepath}")
+            else:
+                print(f"Sound file not found at {filepath}")
+                print("Attempting to create sound files using sound_creator.py")
+                subprocess.call(["python", "sound_creator.py"])
+                if os.path.exists(filepath):
+                    try:
+                        sound_stim = sound.Sound(filepath, secs=duration)
+                        sound_stim.setVolume(0.8)
+                        return sound_stim
+                    except Exception as new_e:
+                        print(f"Failed to create sound even after regenerating file: {new_e}")
+        
+        # If we get here, nothing worked
+        print("Unable to initialize sound system. Please check your audio settings and device.")
+        return None
+        
+    except Exception as e:
+        print(f"Error in create_sound: {e}")
+        return None
 
 def cleanup():
     """Clean up resources properly"""
