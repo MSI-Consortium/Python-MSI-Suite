@@ -282,48 +282,49 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     win.flip()
     core.wait(random.uniform(1, 2))  # Random foreperiod
     
+    # Reset timer and ensure sound is stopped
+    sound_stim.stop()
     trial_clock = core.Clock()
     
-    # For timing precision, schedule the second stimulus relative to the first
+    # For precise timing, always use callOnFlip for critical timing events
     if adjusted_soa <= 0:  # Audio first or simultaneous
-        sound_stim.stop()  # Ensure sound is stopped
-        
         if adjusted_soa == 0:  # Truly simultaneous
-            # Draw visual stimulus first
+            # Prepare visual stimulus
             fixation.draw()
             visual_stim.draw()
             instructions.draw()
             trial_counter.draw()
-            # Schedule audio to play on next flip
+            
+            # Schedule audio and clock reset to happen precisely at flip
             win.callOnFlip(trial_clock.reset)
             win.callOnFlip(sound_stim.play)
             win.flip()
             
-            # Continue visual presentation
+            # Continue visual presentation for remaining frames
             for frame in range(VISUAL_FRAMES-1):
                 fixation.draw()
-                visual_stim.draw()
+                visual_stim.draw() 
                 instructions.draw()
                 trial_counter.draw()
                 win.flip()
-                
         else:  # Audio leads
-            # Start with audio
-            win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)
+            # Schedule audio first with precise timing
             fixation.draw()
             instructions.draw()
             trial_counter.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.callOnFlip(sound_stim.play)  
             win.flip()
             
-            # Wait for the specified SOA
-            while trial_clock.getTime() < abs(adjusted_soa/1000.0):
+            # Calculate frames to wait based on SOA
+            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+            for frame in range(frames_to_wait):
                 fixation.draw()
                 instructions.draw()
                 trial_counter.draw()
                 win.flip()
             
-            # Show visual
+            # Then show visual
             for frame in range(VISUAL_FRAMES):
                 fixation.draw()
                 visual_stim.draw()
@@ -333,11 +334,11 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     
     else:  # Visual first (positive SOA)
         # Start with visual
-        win.callOnFlip(trial_clock.reset)
         fixation.draw()
         visual_stim.draw()
         instructions.draw()
         trial_counter.draw()
+        win.callOnFlip(trial_clock.reset)
         win.flip()
         
         # Show visual for its duration
@@ -348,23 +349,24 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
             trial_counter.draw()
             win.flip()
         
-        # Wait until it's time for audio
-        target_audio_time = adjusted_soa/1000.0
-        while trial_clock.getTime() < target_audio_time:
+        # Calculate frames to wait before audio
+        frames_to_wait = round((adjusted_soa/1000.0 - (VISUAL_FRAMES * frame_dur)) / frame_dur)
+        frames_to_wait = max(0, frames_to_wait)  # Ensure non-negative
+        
+        for frame in range(frames_to_wait):
             fixation.draw()
             instructions.draw()
             trial_counter.draw()
             win.flip()
         
-        # Play audio
-        sound_stim.stop()
-        win.callOnFlip(sound_stim.play)
+        # Play audio with precise timing
         fixation.draw()
         instructions.draw()
         trial_counter.draw()
+        win.callOnFlip(sound_stim.play)
         win.flip()
     
-    # Response collection
+    # Response collection code remains the same...
     response_start = trial_clock.getTime()
     while (trial_clock.getTime() - response_start) < 3.0 and not response_made:
         fixation.draw()
@@ -564,6 +566,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     core.wait(random.uniform(1, 3))
     
     trial_clock = core.Clock()
+    stim_onset = None
     
     def draw_visual_stimuli():
         if '_left' in trial_type:
@@ -580,7 +583,6 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
         elif '_right' in trial_type:
             win.callOnFlip(sound_right.play)
         elif '_bilateral' in trial_type:
-            # Schedule both sounds to play on next flip
             win.callOnFlip(sound_left.play)
             win.callOnFlip(sound_right.play)
     
@@ -598,39 +600,44 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 win.callOnFlip(trial_clock.reset)
                 schedule_audio()
                 win.flip()
+                stim_onset = 0  # Clock was just reset
                 
+                # Continue visual for remaining frames
                 for frame in range(VISUAL_FRAMES-1):
                     fixation.draw()
                     draw_visual_stimuli()
                     feedback.draw()
                     win.flip()
             else:  # Audio leads
-                # Start audio
+                # Audio first
                 fixation.draw()
                 feedback.draw()
                 win.callOnFlip(trial_clock.reset)
                 schedule_audio()
                 win.flip()
+                stim_onset = 0  # Audio onset is our reference time
                 
-                # Wait for the specified sync correction
-                while trial_clock.getTime() < abs(av_sync/1000.0):
+                # Wait precise number of frames
+                frames_to_wait = round(abs(av_sync/1000.0) / frame_dur)
+                for frame in range(frames_to_wait):
                     fixation.draw()
-                    feedback.draw()
+                    feedback.draw() 
                     win.flip()
-                
-                # Show visual
+                    
+                # Then show visual
                 for frame in range(VISUAL_FRAMES):
                     fixation.draw()
                     draw_visual_stimuli()
                     feedback.draw()
                     win.flip()
-        else:  # Visual first
-            # Start visual
-            win.callOnFlip(trial_clock.reset)
+        else:  # Visual first (positive av_sync)
+            # Start with visual
             fixation.draw()
             draw_visual_stimuli()
             feedback.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
+            stim_onset = 0  # Visual onset is reference time
             
             # Show visual for its duration
             for frame in range(VISUAL_FRAMES-1):
@@ -639,52 +646,55 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 feedback.draw()
                 win.flip()
             
-            # Wait until it's time for audio
-            while trial_clock.getTime() < av_sync/1000.0:
+            # Calculate frames to wait before audio
+            frames_to_wait = round((av_sync/1000.0 - (VISUAL_FRAMES * frame_dur)) / frame_dur)
+            frames_to_wait = max(0, frames_to_wait)  # Ensure non-negative
+            
+            for frame in range(frames_to_wait):
                 fixation.draw()
                 feedback.draw()
                 win.flip()
             
-            # Play audio
+            # Play audio with precise timing
             fixation.draw()
             feedback.draw()
-            schedule_audio()
+            win.callOnFlip(schedule_audio)
             win.flip()
-            
+    
     elif 'visual' in trial_type:
-        win.callOnFlip(trial_clock.reset)
+        # Visual only trial
         fixation.draw()
         draw_visual_stimuli()
         feedback.draw()
+        win.callOnFlip(trial_clock.reset)
         win.flip()
+        stim_onset = 0
         
         for frame in range(VISUAL_FRAMES-1):
             fixation.draw()
             draw_visual_stimuli()
             feedback.draw()
             win.flip()
-            
-    else:  # audio
-        # Stop any playing sounds first
-        sound_left.stop()
-        sound_right.stop()
-        
+    
+    elif 'audio' in trial_type:
+        # Audio only trial
         fixation.draw()
         feedback.draw()
         win.callOnFlip(trial_clock.reset)
         schedule_audio()
         win.flip()
+        stim_onset = 0
         
+        # Keep showing fixation
         for frame in range(VISUAL_FRAMES):
             fixation.draw()
             feedback.draw()
             win.flip()
     
     # Response collection
-    response_window = 2.0
-    stim_onset = trial_clock.getTime()  # Save stimulus onset time
+    response_window = 2.0  # Allow 2 seconds for response
     
-    while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
+    while (trial_clock.getTime()) < response_window and not response_made:
         fixation.draw()
         feedback.draw()
         win.flip()
@@ -694,12 +704,12 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
             if key[0] == 'escape':
                 cleanup()
             elif key[0] == 'space':
-                rt = key[1] - stim_onset
+                rt = key[1]  # Already relative to stim_onset since we reset clock at stimulus
                 response_made = True
                 print(f"Response at {rt}s")
                 break
     
-    # Ensure sounds are stopped
+    # End trial - stop all sounds
     sound_left.stop()
     sound_right.stop()
     
@@ -769,8 +779,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 win.flip()
             
             # Wait for SOA using frame-based timing
-            target_time = abs(soa/1000.0)
-            while trial_clock.getTime() < target_time:
+            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+            for frame in range(frames_to_wait):
                 fixation.draw()
                 instructions.draw()
                 trial_counter.draw()
@@ -818,8 +828,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.flip()
             
             # Wait for SOA using frame-based timing
-            target_time = abs(soa/1000.0)
-            while trial_clock.getTime() < target_time:
+            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+            for frame in range(frames_to_wait):
                 fixation.draw()
                 instructions.draw()
                 trial_counter.draw()
@@ -868,7 +878,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 win.flip()
                 
                 # Wait for the specified SOA
-                while trial_clock.getTime() < abs(adjusted_soa/1000.0):
+                frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+                for frame in range(frames_to_wait):
                     fixation.draw()
                     instructions.draw()
                     trial_counter.draw()
@@ -900,7 +911,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 win.flip()
             
             # Wait until it's time for audio
-            while trial_clock.getTime() < adjusted_soa/1000.0:
+            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+            for frame in range(frames_to_wait):
                 fixation.draw()
                 instructions.draw()
                 trial_counter.draw()
@@ -1155,6 +1167,17 @@ print(f"Actual frame rate: {actual_fps}")
 def verify_visual_timing(win, target_dur):
     """Returns True if the last visual timing was acceptable"""
     return abs(win.lastFrameT - target_dur) < 0.001  # 1ms tolerance
+
+def verify_timing_accuracy(expected_time, actual_time, tolerance=0.002):
+    """Verify timing accuracy and log any issues"""
+    diff = abs(actual_time - expected_time)
+    if diff > tolerance:
+        print(f"TIMING WARNING: Expected {expected_time}s, got {actual_time}s (diff: {diff}s)")
+    return diff <= tolerance
+
+def soa_to_frames(soa_ms, frame_duration):
+    """Convert SOA in milliseconds to number of frames"""
+    return round((soa_ms/1000.0) / frame_duration)
 
 # Modify sound creation to include error handling and cleanup
 def create_sound(filename, duration):
