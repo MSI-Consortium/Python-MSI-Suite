@@ -1,4 +1,0 @@
-Participant_ID,Age,Gender,Site,Block_Number,Trial_Number,Trial_Type,SOA,Side,Response,Reaction_Time,Timestamp,Experiment
-031,4,m,vandy,1,1,audiovisual,-50,,-1,,11.892272699999921,sj
-031,4,m,vandy,1,2,audiovisual,50,,1,0.9662830999996004,16.64204459999928,sj
-031,4,m,vandy,1,3,audiovisual,-200,,-1,,18.885831300000063,sj
