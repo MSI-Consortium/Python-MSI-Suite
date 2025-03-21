@@ -469,15 +469,26 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     test_mode = config.get('test_mode', False)
     soa_text = None
     if test_mode:
+        # Basic SOA display
         if soa < 0:
             soa_display = f"A{abs(soa)}V"
         elif soa > 0:
             soa_display = f"V{soa}A"
         else:
             soa_display = "SYNC"
-        soa_text = visual.TextStim(win, text=f"{soa_display} (corr: {av_sync}ms)", 
-                                 color="black", height=0.5, pos=(0, 3))
+            
+        # Create visualization of how correction affects timing
+        timing_indicator = ""
+        if av_sync > 0:
+            timing_indicator = f"← Visual shifted earlier by {av_sync}ms"
+        elif av_sync < 0:
+            timing_indicator = f"Visual shifted later by {abs(av_sync)}ms →"
+        
+        # Full display text showing both SOA and correction effect
+        display_text = f"{soa_display} (corr: {av_sync}ms)\n{timing_indicator}"
+        soa_text = visual.TextStim(win, text=display_text, color="black", height=0.5, pos=(0, 3))
     
+    # Rest of function remains unchanged
     response_made = False
     rt = None
     response = -1

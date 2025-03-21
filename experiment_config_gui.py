@@ -199,8 +199,22 @@ class ExperimentConfigApp(QWidget):
         self.av_sync_correction.setSingleStep(1)
         self.av_sync_correction.setSuffix(' ms')
         self.av_sync_correction.setDecimals(2)
+        
+        # Add tooltip explanation for correction factor
+        self.av_sync_correction.setToolTip(
+            "Positive values move the visual stimulus earlier (forward) in relation to audio.\n"
+            "Negative values move the visual stimulus later (backward) in relation to audio.\n"
+            "Example: +100ms means visual appears 100ms before audio would normally occur."
+        )
+        
+        # Add explanatory label for correction factor
+        correction_explanation = QLabel(
+            "Positive: Visual comes earlier, Negative: Visual comes later"
+        )
+        correction_explanation.setWordWrap(True)
 
         av_sync_layout.addRow('Correction (ms):', self.av_sync_correction)
+        av_sync_layout.addRow(correction_explanation)
         av_sync_group.setLayout(av_sync_layout)
         main_layout.addWidget(av_sync_group)
 
