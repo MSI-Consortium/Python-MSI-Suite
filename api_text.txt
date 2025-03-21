@@ -1,2 +1,2 @@
-api_url=https://redcap.vumc.org/api/
-api_token=431BE2520C4538EFEB6100975D3D451C
+api_url=insert_your_url
+api_token=insert_your_token
