@@ -6,6 +6,7 @@ import os
 import subprocess
 import redcap
 from typing import List
+import copy
 
 class BlockConfig(QGroupBox):
     def __init__(self, block_number):
@@ -111,10 +112,14 @@ class ExperimentConfigApp(QWidget):
             
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to update participant IDs: {str(e)}")
+    
     def __init__(self):
         super().__init__()
         self.blocks = []
         self.last_saved_file = None
+        self.original_config = None  # Store the original config for change detection
+        self.has_unsaved_changes = False  # Track whether changes have been made
+        
         self.initUI()
         self.load_default_config()
         self.load_api_credentials()
@@ -122,10 +127,13 @@ class ExperimentConfigApp(QWidget):
         # Connect API credential changes to participant ID update
         self.api_url.textChanged.connect(self.update_participant_ids)
         self.api_token.textChanged.connect(self.update_participant_ids)
+        
+        # Connect change tracking to all input widgets
+        self.connect_change_tracking()
 
     def initUI(self):
         self.setWindowTitle('Multi-Block Experiment Configuration')
-        self.setGeometry(100, 100, 800, 700)
+        self.setGeometry(100, 100, 800, 800)
         
         main_layout = QVBoxLayout()
     
@@ -155,6 +163,14 @@ class ExperimentConfigApp(QWidget):
         # Add fullscreen checkbox after site selection
         self.fullscreen = QCheckBox('Fullscreen Mode')
         participant_layout.addRow('Fullscreen:', self.fullscreen)
+        
+        # Add test mode checkbox for SJ tasks
+        self.test_mode = QCheckBox('Test Mode (show SOA values)')
+        participant_layout.addRow('Test Mode:', self.test_mode)
+        
+        # Add offline mode checkbox
+        self.offline_mode = QCheckBox('Offline Mode (no REDCap connection required)')
+        participant_layout.addRow('Offline Mode:', self.offline_mode)
         
         # API URL and Token input fields
         self.api_url = QLineEdit()
@@ -210,6 +226,10 @@ class ExperimentConfigApp(QWidget):
         self.total_time_label = QLabel('Total estimated experiment time: 0 min')
         main_layout.addWidget(self.total_time_label)
 
+        # Status label for change tracking
+        self.status_label = QLabel('')  # Initialized empty
+        main_layout.addWidget(self.status_label)
+
         # Load, Save and Run buttons
         load_save_run_layout = QHBoxLayout()
         
@@ -230,6 +250,35 @@ class ExperimentConfigApp(QWidget):
         self.setLayout(main_layout)
         self.add_block()  # Start with one block
 
+    def connect_change_tracking(self):
+        """Connect change tracking signals to all UI elements"""
+        # Connect participant info widgets
+        self.participant_id.currentTextChanged.connect(self.mark_as_changed)
+        self.participant_id.editTextChanged.connect(self.mark_as_changed)
+        self.age.valueChanged.connect(self.mark_as_changed)
+        self.gender.currentTextChanged.connect(self.mark_as_changed)
+        self.site.currentTextChanged.connect(self.mark_as_changed)
+        self.fullscreen.stateChanged.connect(self.mark_as_changed)
+        self.test_mode.stateChanged.connect(self.mark_as_changed)
+        self.offline_mode.stateChanged.connect(self.mark_as_changed)
+        self.api_url.textChanged.connect(self.mark_as_changed)
+        self.api_token.textChanged.connect(self.mark_as_changed)
+        self.av_sync_correction.valueChanged.connect(self.mark_as_changed)
+        
+        # Block add/remove actions are connected separately in their respective methods
+
+    def mark_as_changed(self):
+        """Mark the configuration as having unsaved changes"""
+        self.has_unsaved_changes = True
+        self.update_status_label()
+    
+    def update_status_label(self):
+        """Update the status label to reflect current change state"""
+        if self.has_unsaved_changes:
+            self.status_label.setText("<b>Unsaved changes</b>")
+        else:
+            self.status_label.setText("")
+
     def fetch_redcap_records(self) -> List[str]:
         """Fetch existing record IDs from REDCap and determine next available ID."""
         try:
@@ -243,12 +292,27 @@ class ExperimentConfigApp(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "REDCap Connection Error", f"Could not fetch records: {str(e)}")
             return []
+    
     def load_default_config(self):
         default_file = 'default.json'
         if os.path.exists(default_file):
             self.load_config_from_file(default_file, set_last_saved_file=False)
+            self.has_unsaved_changes = False  # Reset change tracker after loading default
+            self.update_status_label()
 
     def load_config_file(self):
+        # Check for unsaved changes before loading a new config
+        if self.has_unsaved_changes:
+            reply = QMessageBox.question(self, 'Unsaved Changes', 
+                                      'You have unsaved changes. Do you want to save them first?',
+                                      QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+            
+            if reply == QMessageBox.Yes:
+                if not self.save_config():
+                    return  # User canceled save operation
+            elif reply == QMessageBox.Cancel:
+                return  # User canceled the load operation
+        
         filename, _ = QFileDialog.getOpenFileName(self, 'Load Config', '', 'JSON Files (*.json)')
         if filename:
             self.load_config_from_file(filename)
@@ -257,10 +321,20 @@ class ExperimentConfigApp(QWidget):
         try:
             with open(filename, 'r') as f:
                 config = json.load(f)
+            
+            # Store a deep copy of the original config for change comparison
+            self.original_config = copy.deepcopy(config)
+            
             self.load_config(config)
             QMessageBox.information(self, "Configuration Loaded", f"Configuration loaded from {filename}")
+            
             if set_last_saved_file:
                 self.last_saved_file = filename
+            
+            # Reset change tracking after loading
+            self.has_unsaved_changes = False
+            self.update_status_label()
+            
         except json.JSONDecodeError:
             QMessageBox.warning(self, "Error", "Invalid JSON file. Please select a valid configuration file.")
         except Exception as e:
@@ -273,6 +347,8 @@ class ExperimentConfigApp(QWidget):
         self.gender.setCurrentText(config.get('gender', 'm'))
         self.site.setCurrentText(config.get('site', 'vandy'))
         self.fullscreen.setChecked(config.get('fullscreen', False))  # Load fullscreen setting
+        self.test_mode.setChecked(config.get('test_mode', False))  # Load test mode setting
+        self.offline_mode.setChecked(config.get('offline_mode', False))  # Load offline mode setting
     
         # Set audiovisual synchrony correction value
         self.av_sync_correction.setValue(config.get('av_sync_correction', 0.0))
@@ -294,6 +370,12 @@ class ExperimentConfigApp(QWidget):
         block.trials_per_condition.valueChanged.connect(self.update_total_time)
         block.exp_type.currentTextChanged.connect(self.update_total_time)
         
+        # Connect change tracking to block widgets
+        block.trials_per_condition.valueChanged.connect(self.mark_as_changed)
+        block.exp_type.currentTextChanged.connect(self.mark_as_changed)
+        block.left_audio_high.stateChanged.connect(self.mark_as_changed)
+        block.left_visual_green.stateChanged.connect(self.mark_as_changed)
+        
         if block_config:
             block.exp_type.setCurrentText(block_config.get('experiment', 'SJ'))
             block.trials_per_condition.setValue(block_config.get('trials_per_condition', 1))
@@ -304,6 +386,10 @@ class ExperimentConfigApp(QWidget):
         self.blocks.append(block)
         self.blocks_layout.addWidget(block)
         self.update_total_time()
+        
+        # Mark as changed if this was a user-initiated block addition (not from loading)
+        if not block_config:
+            self.mark_as_changed()
 
     def remove_block(self):
         if self.blocks:
@@ -311,6 +397,8 @@ class ExperimentConfigApp(QWidget):
             block.setParent(None)
             block.deleteLater()
             self.update_total_time()
+            # Mark as changed for user-initiated block removal
+            self.mark_as_changed()
 
     def update_total_time(self):
         total_time = sum(float(block.time_estimate_label.text().split(': ')[1].split(' ')[0]) for block in self.blocks)
@@ -323,6 +411,8 @@ class ExperimentConfigApp(QWidget):
             'gender': self.gender.currentText(),
             'site': self.site.currentText(),
             'fullscreen': self.fullscreen.isChecked(),  # Add fullscreen to config
+            'test_mode': self.test_mode.isChecked(),  # Add test mode to config
+            'offline_mode': self.offline_mode.isChecked(),  # Add offline mode to config
             'api_url': self.api_url.text(),
             'api_token': self.api_token.text(),
             'av_sync_correction': self.av_sync_correction.value(),  # Added missing field
@@ -330,6 +420,28 @@ class ExperimentConfigApp(QWidget):
             'total_estimated_time': float(self.total_time_label.text().split(': ')[1].split(' ')[0])
         }
         return config
+    
+    def config_has_changed(self):
+        """Compare current config with original loaded config to detect changes"""
+        if self.original_config is None:
+            return self.has_unsaved_changes
+        
+        current_config = self.get_current_config()
+        
+        # Remove API credential fields from comparison since they're saved separately
+        current_copy = copy.deepcopy(current_config)
+        original_copy = copy.deepcopy(self.original_config)
+        
+        if 'api_url' in current_copy:
+            del current_copy['api_url']
+        if 'api_token' in current_copy:
+            del current_copy['api_token']
+        if 'api_url' in original_copy:
+            del original_copy['api_url']
+        if 'api_token' in original_copy:
+            del original_copy['api_token']
+        
+        return current_copy != original_copy
     
     def load_api_credentials(self, filename="api_text.txt"):
         """Load API URL and token from file, or prompt user if file is missing or values are invalid."""
@@ -346,6 +458,7 @@ class ExperimentConfigApp(QWidget):
         else:
             QMessageBox.information(self, "Enter API Credentials", 
                                 "API credentials not found. Please enter the API URL and Token in the fields provided.")
+    
     def save_api_credentials(self, filename="api_text.txt"):
         """Save API URL and token to file."""
         with open(filename, 'w') as file:
@@ -354,12 +467,58 @@ class ExperimentConfigApp(QWidget):
 
     def save_config(self):
         config = self.get_current_config()
-        filename, _ = QFileDialog.getSaveFileName(self, 'Save Config', '', 'JSON Files (*.json)')
+        
+        # If we have a last_saved_file and no changes, no need to save again
+        if self.last_saved_file and not self.has_unsaved_changes and not self.config_has_changed():
+            return self.last_saved_file
+        
+        # If config has been modified, suggest saving with a new name
+        suggest_new_filename = self.last_saved_file and self.config_has_changed()
+        
+        if suggest_new_filename:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Question)
+            msg.setText("Configuration has been modified.")
+            msg.setInformativeText("Do you want to save changes to a new file?")
+            msg.setWindowTitle("Save Changes")
+            save_new_btn = msg.addButton("Save As New", QMessageBox.ActionRole)
+            overwrite_btn = msg.addButton("Overwrite Original", QMessageBox.ActionRole)
+            cancel_btn = msg.addButton(QMessageBox.Cancel)
+            msg.setDefaultButton(save_new_btn)
+            msg.exec_()
+            
+            if msg.clickedButton() == save_new_btn:
+                # User chose to save as new file - continue to file dialog
+                pass
+            elif msg.clickedButton() == overwrite_btn:
+                # User chose to overwrite original file
+                filename = self.last_saved_file
+                with open(filename, 'w') as f:
+                    json.dump(config, f, indent=2)
+                QMessageBox.information(self, "Configuration Saved", f"Configuration saved to {filename}")
+                self.original_config = copy.deepcopy(config)
+                self.has_unsaved_changes = False
+                self.update_status_label()
+                self.save_api_credentials()
+                return filename
+            else:
+                # User canceled
+                return None
+        
+        # Default save dialog
+        suggested_name = ''
+        if self.last_saved_file and not suggest_new_filename:
+            suggested_name = self.last_saved_file
+            
+        filename, _ = QFileDialog.getSaveFileName(self, 'Save Config', suggested_name, 'JSON Files (*.json)')
         if filename:
             with open(filename, 'w') as f:
                 json.dump(config, f, indent=2)
             QMessageBox.information(self, "Configuration Saved", f"Configuration saved to {filename}")
             self.last_saved_file = filename
+            self.original_config = copy.deepcopy(config)
+            self.has_unsaved_changes = False
+            self.update_status_label()
             self.save_api_credentials()  # Save API credentials when saving configuration
             return filename
         else:
@@ -367,46 +526,41 @@ class ExperimentConfigApp(QWidget):
 
 
     def save_and_run(self):
-        if self.last_saved_file:
-            # Proceed to run the experiment
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("The experiment will now start in a separate process.\n"
-                        "This window will close to avoid interference with timing.\n"
-                        "The experiment will run in the background.")
-            msg.setWindowTitle("Starting Experiment")
-            msg.setStandardButtons(QMessageBox.Ok)
-            msg.exec_()
-
-            # Start the experiment in a separate process
-            subprocess.Popen([sys.executable, 'run_MSI_GUI_experiment.py', self.last_saved_file])
-
-            # Close the configuration app
-            self.close()
-        else:
+        # First, check if there are unsaved changes
+        if self.has_unsaved_changes or self.config_has_changed():
             filename = self.save_config()
             if not filename:
                 # User cancelled save, do not proceed
                 QMessageBox.warning(self, "Save Configuration", "You must save the configuration before running the experiment.")
                 return  # Exit the method without running the experiment
-
+                
             self.last_saved_file = filename
+        elif not self.last_saved_file:
+            # No last saved file but no changes either - need to save first
+            filename = self.save_config()
+            if not filename:
+                QMessageBox.warning(self, "Save Configuration", "You must save the configuration before running the experiment.")
+                return
+                
+            self.last_saved_file = filename
+        
+        # Now we have a valid saved file that matches the current configuration
+        
+        # Proceed to run the experiment
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Information)
+        msg.setText("The experiment will now start in a separate process.\n"
+                    "This window will close to avoid interference with timing.\n"
+                    "The experiment will run in the background.")
+        msg.setWindowTitle("Starting Experiment")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.exec_()
 
-            # Proceed to run the experiment
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("The experiment will now start in a separate process.\n"
-                        "This window will close to avoid interference with timing.\n"
-                        "The experiment will run in the background.")
-            msg.setWindowTitle("Starting Experiment")
-            msg.setStandardButtons(QMessageBox.Ok)
-            msg.exec_()
+        # Start the experiment in a separate process
+        subprocess.Popen([sys.executable, 'run_MSI_GUI_experiment.py', self.last_saved_file])
 
-            # Start the experiment in a separate process
-            subprocess.Popen([sys.executable, 'run_MSI_GUI_experiment.py', self.last_saved_file])
-
-            # Close the configuration app
-            self.close()
+        # Close the configuration app
+        self.close()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

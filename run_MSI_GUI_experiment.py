@@ -3,7 +3,7 @@
 """
 Created on Thu Sep  5 07:48:19 2024
 
-@author: David
+@author: David Tovar
 """
 import platform
 import random
@@ -27,6 +27,183 @@ sound.init()  # Explicitly initialize sound system
 import numpy as np
 import redcap
 import subprocess  # Add this import at the top
+
+def load_config(config_file):
+    with open(config_file, 'r') as f:
+        return json.load(f)
+
+def check_and_upload_offline_files(api_url, api_token):
+    """Check for offline data files and upload them to REDCap if online.
+    
+    Fetches the latest record ID from REDCap and ensures offline files
+    are correctly numbered before upload.
+    """
+    try:
+        print("\nChecking for offline data files...")
+        offline_files = []
+        
+        # Find all data files with 'offline' in the filename
+        for file in os.listdir():
+            if file.startswith('data_') and file.endswith('.csv') and 'offline' in file:
+                offline_files.append(file)
+                
+        # Also find offline demographic files
+        for file in os.listdir():
+            if file.startswith('demographic_data_') and file.endswith('.csv') and 'offline' in file:
+                offline_files.append(file)
+        
+        if not offline_files:
+            print("No offline files found.")
+            return
+            
+        print(f"Found {len(offline_files)} offline files.")
+        
+        # Try to connect to REDCap and get the latest record ID
+        try:
+            project = redcap.Project(api_url, api_token)
+            print("Connected to REDCap project for offline file upload.")
+            
+            # Get all existing record IDs to find the highest one
+            try:
+                records = project.export_records(fields=['record_id'])
+                record_ids = [int(record['record_id']) for record in records if record['record_id'].isdigit()]
+                
+                if record_ids:
+                    next_id = max(record_ids) + 1
+                else:
+                    next_id = 1
+                    
+                print(f"Next available REDCap record ID: {next_id}")
+                
+                # Group files by participant to ensure data and demographic files for the same 
+                # participant get the same new ID
+                participant_files = {}
+                
+                for file in offline_files:
+                    parts = file.split('_')
+                    if file.startswith('data_'):
+                        participant_id = parts[1]
+                    else:  # demographic file
+                        participant_id = parts[2]
+                    
+                    if participant_id not in participant_files:
+                        participant_files[participant_id] = []
+                    
+                    participant_files[participant_id].append(file)
+                
+                # Process files in batches by participant, assigning new sequential IDs
+                for offline_id, files in participant_files.items():
+                    new_id_str = str(next_id).zfill(3)  # Format with leading zeros
+                    print(f"Assigning ID {new_id_str} to offline participant {offline_id}")
+                    
+                    for file in files:
+                        # Prepare the record and upload
+                        record_data = [{'record_id': new_id_str}]
+                        project.import_records(record_data)
+                        
+                        # Create new filename before upload
+                        if file.startswith('data_'):
+                            # Format: data_ID_age_gender_site_offline_timestamp.csv
+                            parts = file.split('_')
+                            timestamp = parts[-1]  # Get timestamp
+                            age = parts[2]
+                            gender = parts[3]
+                            site = parts[4]
+                            new_filename = f"data_{new_id_str}_{age}_{gender}_{site}_{timestamp}"
+                        else:
+                            # Format: demographic_data_ID_offline_timestamp.csv
+                            parts = file.split('_')
+                            timestamp = parts[-1]  # Get timestamp
+                            new_filename = f"demographic_data_{new_id_str}_{timestamp}"
+                        
+                        print(f"Renaming {file} to {new_filename} for upload")
+                        
+                        # Determine the field name for upload
+                        if file.startswith('data_'):
+                            field_name = 'python_data_file'
+                        else:
+                            field_name = 'demographic_data_file'
+                        
+                        # Upload file with the new ID
+                        try:
+                            with open(file, 'rb') as f:
+                                file_content = f.read()
+                                
+                                # For data files, we need to update the participant ID inside the CSV content
+                                if file.startswith('data_'):
+                                    # Read the file, update the participant ID in the content
+                                    with open(file, 'r') as csv_file:
+                                        lines = csv_file.readlines()
+                                        
+                                    header = lines[0]
+                                    updated_lines = [header]
+                                    
+                                    # Update each data row with the new participant ID
+                                    for line in lines[1:]:
+                                        data = line.split(',')
+                                        data[0] = new_id_str  # Replace participant ID
+                                        updated_lines.append(','.join(data))
+                                    
+                                    # Write updated content to the new file
+                                    with open(new_filename, 'w') as new_file:
+                                        new_file.writelines(updated_lines)
+                                        
+                                    # Now read the updated file for upload
+                                    with open(new_filename, 'rb') as new_file:
+                                        file_content = new_file.read()
+                                else:
+                                    # Simply rename the demographic file and update its content
+                                    with open(file, 'r') as csv_file:
+                                        lines = csv_file.readlines()
+                                        
+                                    header = lines[0]
+                                    # There should be only one data row in demographic files
+                                    if len(lines) > 1:
+                                        data = lines[1].split(',')
+                                        data[0] = new_id_str  # Replace participant ID
+                                        updated_content = header + ','.join(data)
+                                        
+                                        with open(new_filename, 'w') as new_file:
+                                            new_file.write(updated_content)
+                                            
+                                        with open(new_filename, 'rb') as new_file:
+                                            file_content = new_file.read()
+                            
+                            # Upload the file with the new name and ID
+                            project.import_file(
+                                record=new_id_str,
+                                field=field_name,
+                                file_name=new_filename,
+                                file_content=file_content
+                            )
+                            
+                            print(f"Successfully uploaded {new_filename} to REDCap with ID {new_id_str}")
+                            
+                            # Delete the original offline file since we've created a renamed version
+                            if os.path.exists(file):
+                                os.remove(file)
+                                print(f"Removed original offline file: {file}")
+                                
+                        except Exception as e:
+                            print(f"Error processing {file}: {str(e)}")
+                            continue
+                    
+                    # Increment the ID for the next participant
+                    next_id += 1
+                    
+            except Exception as e:
+                print(f"Error fetching REDCap records: {str(e)}")
+                return
+                    
+        except Exception as e:
+            print(f"Error connecting to REDCap: {str(e)}")
+            return
+            
+    except Exception as e:
+        print(f"Error checking for offline files: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return
 
 def load_api_credentials(filename="api_text.txt"):
     """Load API URL and token from file. Returns None if not found or incomplete."""
@@ -53,17 +230,27 @@ def load_api_credentials(filename="api_text.txt"):
 # Load API credentials
 api_url, api_token = load_api_credentials()
 
-# Initialize REDCap project if credentials are available
-if api_url and api_token:
-    project = redcap.Project(api_url, api_token)
+# Initialize REDCap project if credentials are available and not in offline mode
+config = load_config(sys.argv[1])
+offline_mode = config.get('offline_mode', False)
+
+if api_url and api_token and not offline_mode:
     try:
+        project = redcap.Project(api_url, api_token)
         print("\nVerifying REDCap connection...")
         project_info = project.export_project_info()
         print(f"Connected to REDCap project: {project_info['project_title']}")
+        
+        # Check for offline files and upload them
+        check_and_upload_offline_files(api_url, api_token)
     except Exception as e:
         print(f"Error connecting to REDCap: {e}")
         project = None
 else:
+    if offline_mode:
+        print("Running in offline mode. Data will be saved locally.")
+    else:
+        print("REDCap credentials not available. Running in offline mode.")
     project = None
 
 # Detect operating system
@@ -89,21 +276,28 @@ else:
     }
 
 
-def load_config(config_file):
-    with open(config_file, 'r') as f:
-        return json.load(f)
+
 
 def save_demographic_data(config):
     """Save demographic data to CSV and create REDCap record if possible."""
     # Generate filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d")
-    demo_filename = f"demographic_data_{config['participant_id']}_{timestamp}.csv"
+    
+    # Add offline tag to filename if in offline mode
+    offline_mode = config.get('offline_mode', False)
+    offline_tag = "_offline" if offline_mode else ""
+    demo_filename = f"demographic_data_{config['participant_id']}{offline_tag}_{timestamp}.csv"
     
     # Save demographic data to CSV
     with open(demo_filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['record_id', 'age', 'gender'])
         writer.writerow([config['participant_id'], config['age'], config['gender']])
+    
+    # Skip REDCap upload if in offline mode
+    if offline_mode:
+        print("Running in offline mode. Demographic data saved locally.")
+        return demo_filename
     
     if project:
         try:
@@ -123,8 +317,8 @@ def save_demographic_data(config):
                     response = project.import_file(
                         record=config['participant_id'],
                         field='demographic_data_file',
-                        fname=demo_filename,
-                        fobj=file_content
+                        file_name=demo_filename,
+                        file_content=file_content
                     )
                 print(f"Uploaded demographic CSV file for participant: {config['participant_id']}")
             except Exception as e:
@@ -271,107 +465,116 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     adjusted_soa = soa + av_sync
     print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
     
+    # Create SOA display text for test mode
+    test_mode = config.get('test_mode', False)
+    soa_text = None
+    if test_mode:
+        if soa < 0:
+            soa_display = f"A{abs(soa)}V"
+        elif soa > 0:
+            soa_display = f"V{soa}A"
+        else:
+            soa_display = "SYNC"
+        soa_text = visual.TextStim(win, text=f"{soa_display} (corr: {av_sync}ms)", 
+                                 color="black", height=0.5, pos=(0, 3))
+    
     response_made = False
     rt = None
     response = -1
     
+    # Additional elements to draw with the visual stimulus
+    additional_stims = [instructions, trial_counter]
+    if test_mode and soa_text:
+        additional_stims.append(soa_text)
+    
     # Pre-trial setup
     fixation.draw()
-    instructions.draw()
-    trial_counter.draw()
+    for stim in additional_stims:
+        stim.draw()
     win.flip()
     core.wait(random.uniform(1, 2))  # Random foreperiod
     
-    # Reset timer and ensure sound is stopped
-    sound_stim.stop()
     trial_clock = core.Clock()
     
-    # For precise timing, always use callOnFlip for critical timing events
+    # Ensure visual stimulus duration is constant
+    visual_duration = VISUAL_FRAMES * frame_dur
+    
     if adjusted_soa <= 0:  # Audio first or simultaneous
         if adjusted_soa == 0:  # Truly simultaneous
-            # Prepare visual stimulus
+            # For simultaneous presentation, play audio in a separate step
+            # to avoid timing issues that can shorten the visual stimulus
+            
+            # First, reset the clock but don't play audio yet
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            
+            # Now draw visual and play audio
             fixation.draw()
             visual_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(sound_stim.play)
+            win.flip()
             
-            # Schedule audio and clock reset to happen precisely at flip
+            # Use robust presentation for remaining frames
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+        
+        else:  # Audio leads
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.callOnFlip(sound_stim.play)
             win.flip()
             
-            # Continue visual presentation for remaining frames
-            for frame in range(VISUAL_FRAMES-1):
-                fixation.draw()
-                visual_stim.draw() 
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
-        else:  # Audio leads
-            # Schedule audio first with precise timing
-            fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)  
-            win.flip()
-            
-            # Calculate frames to wait based on SOA
+            # Wait for SOA
             frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
             for frame in range(frames_to_wait):
                 fixation.draw()
-                instructions.draw()
-                trial_counter.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.flip()
             
-            # Then show visual
-            for frame in range(VISUAL_FRAMES):
-                fixation.draw()
-                visual_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
+            # Use robust presentation for visual stimulus
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
     
-    else:  # Visual first (positive SOA)
-        # Start with visual
+    else:  # Visual first
+        # Show visual for its full duration
         fixation.draw()
         visual_stim.draw()
-        instructions.draw()
-        trial_counter.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.callOnFlip(trial_clock.reset)
         win.flip()
         
-        # Show visual for its duration
-        for frame in range(VISUAL_FRAMES-1):
-            fixation.draw()
-            visual_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
-            win.flip()
+        # Use robust presentation for remaining frames
+        ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
         
-        # Calculate frames to wait before audio
-        frames_to_wait = round((adjusted_soa/1000.0 - (VISUAL_FRAMES * frame_dur)) / frame_dur)
-        frames_to_wait = max(0, frames_to_wait)  # Ensure non-negative
+        # Wait until time to play audio
+        frames_to_wait = round((adjusted_soa/1000.0 - visual_duration) / frame_dur)
+        frames_to_wait = max(0, frames_to_wait)
         
         for frame in range(frames_to_wait):
             fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.flip()
         
-        # Play audio with precise timing
+        # Play audio
         fixation.draw()
-        instructions.draw()
-        trial_counter.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.callOnFlip(sound_stim.play)
         win.flip()
     
-    # Response collection code remains the same...
-    response_start = trial_clock.getTime()
-    while (trial_clock.getTime() - response_start) < 3.0 and not response_made:
+    # Modified response collection - wait indefinitely until response
+    while not response_made:
         fixation.draw()
-        instructions.draw()
-        trial_counter.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.flip()
         
         keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
@@ -394,23 +597,26 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     response_made = False
     rt = None
     
+    # Create correction text for test mode
+    test_mode = config.get('test_mode', False)
+    correction_text = None
+    if test_mode:
+        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)", 
+                                         color="black", height=0.5, pos=(0, 3))
+    
+    # Additional elements to draw with the visual stimulus
+    additional_stims = [feedback]
+    if test_mode and correction_text:
+        additional_stims.append(correction_text)
+    
     # Pre-trial setup
     fixation.draw()
-    feedback.draw()
+    for stim in additional_stims:
+        stim.draw()
     win.flip()
     foreperiod = random.uniform(1, 3)
     print(f"Waiting foreperiod: {foreperiod}s")
     core.wait(foreperiod)
-    
-    # Calculate fixed stimulus duration
-    stimulus_duration = VISUAL_STIM_DURATION
-    if actual_fps is None:
-        assumed_fps = 60.0
-        stimulus_frames = max(1, int(stimulus_duration * assumed_fps))
-        print(f"Using assumed refresh rate of {assumed_fps}Hz")
-    else:
-        stimulus_frames = max(1, int(stimulus_duration * actual_fps))
-    print(f"Stimulus duration: {stimulus_duration}s ({stimulus_frames} frames)")
     
     trial_clock = core.Clock()
     trial_clock.reset()
@@ -421,110 +627,132 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
         print(f"Starting AV stimulus with {av_sync}ms offset")
         if av_sync <= 0:  # Audio first or simultaneous
             if av_sync == 0:  # Truly simultaneous
-                # Present both stimuli for full duration
+                # First, reset the clock but don't play audio yet
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(trial_clock.reset)
+                win.flip()
+                
+                # Now draw visual and play audio together
                 fixation.draw()
                 visual_stim.draw()
-                feedback.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.callOnFlip(sound_stim.play)
                 win.flip()
                 stim_onset = trial_clock.getTime()
-                print(f"Simultaneous AV onset at {stim_onset}")
                 
-                # Maintain visual stimulus for full duration
-                for frame in range(stimulus_frames-1):
-                    fixation.draw()
-                    visual_stim.draw()
-                    feedback.draw()
-                    win.flip()
+                # Use our robust presentation method for remaining frames
+                ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
             
             else:  # Audio leads
                 print("Playing audio")
-                sound_stim.play()
-                wait_time = abs(av_sync)/1000.0
-                print(f"Waiting {wait_time}s before visual")
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(trial_clock.reset)
+                win.callOnFlip(sound_stim.play)
+                win.flip()
                 
-                # Show fixation during wait
-                wait_frames = int(wait_time * actual_fps if actual_fps else wait_time * 60.0)
+                # Wait for SOA
+                wait_frames = round(abs(av_sync/1000.0) / frame_dur)
                 for frame in range(wait_frames):
                     fixation.draw()
-                    feedback.draw()
+                    for stim in additional_stims:
+                        stim.draw()
                     win.flip()
                 
-                # Then show visual for fixed duration
-                print("Starting visual presentation")
-                fixation.draw()
-                visual_stim.draw()
-                feedback.draw()
-                win.flip()
+                # Show visual for full duration using our robust method
                 stim_onset = trial_clock.getTime()
+                ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
                 
-                for frame in range(stimulus_frames-1):
-                    fixation.draw()
-                    visual_stim.draw()
-                    feedback.draw()
-                    win.flip()
-                print(f"Visual presentation complete at {trial_clock.getTime() - stim_onset}s")
-                
-        else:  # Visual first (positive asynchrony)
-            # Present visual for fixed duration
-            print("Starting visual presentation")
+        else:  # Visual first
+            # Start with visual
             fixation.draw()
             visual_stim.draw()
-            feedback.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
             stim_onset = trial_clock.getTime()
             
-            for frame in range(stimulus_frames-1):
+            # Use robust presentation for remaining visual frames
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+            
+            # Calculate frames to wait before audio
+            frames_to_wait = round((av_sync/1000.0) / frame_dur)
+            
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            stim_onset = trial_clock.getTime()
+            
+            # Ensure full VISUAL_FRAMES duration
+            for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
                 visual_stim.draw()
-                feedback.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.flip()
             
-            # Show fixation during delay before audio
-            wait_time = av_sync/1000.0
-            wait_frames = int(wait_time * actual_fps if actual_fps else wait_time * 60.0)
-            print(f"Adding {wait_frames} delay frames before audio")
+            # Calculate frames to wait before audio
+            frames_to_wait = round((av_sync/1000.0) / frame_dur)
             
-            for frame in range(wait_frames):
+            # Wait until audio should start
+            for frame in range(frames_to_wait):
                 fixation.draw()
-                feedback.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.flip()
             
-            sound_stim.stop()
-            sound_stim.play()
-            print("Playing audio")
+            # Play audio
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(sound_stim.play)
+            win.flip()
             
     elif trial_type == 'visual':
-        print("Starting visual stimulus")
+        # Visual only trial
         fixation.draw()
         visual_stim.draw()
-        feedback.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.callOnFlip(trial_clock.reset)
         win.flip()
         stim_onset = trial_clock.getTime()
         
-        for frame in range(stimulus_frames-1):
+        # Ensure full VISUAL_FRAMES duration
+        for frame in range(VISUAL_FRAMES - 1):
             fixation.draw()
             visual_stim.draw()
-            feedback.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.flip()
             
     else:  # audio
         print("Starting audio stimulus")
-        sound_stim.stop()
-        sound_stim.play()
+        fixation.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.callOnFlip(trial_clock.reset)
+        win.callOnFlip(sound_stim.play)
+        win.flip()
         stim_onset = trial_clock.getTime()
         
-        for frame in range(stimulus_frames):
+        # Show fixation for consistent duration (matching visual)
+        for frame in range(VISUAL_FRAMES - 1):
             fixation.draw()
-            feedback.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.flip()
     
-    # Clear stimulus and wait for response
+    # Response collection
     response_window = 2.0  # Allow 2 seconds for response
-    
     while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
         fixation.draw()
-        feedback.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.flip()
         
         keys = event.getKeys(['space', 'escape'], timeStamped=trial_clock)
@@ -537,14 +765,7 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
                 print(f"Response at {rt}s")
                 break
     
-    # End trial
-    fixation.draw()
-    feedback.draw()
-    win.flip()
     sound_stim.stop()
-    
-    end_time = trial_clock.getTime()
-    print(f"Trial duration: {end_time - stim_onset}s")
     
     if rt is not None and rt < 0.05:
         print("Response too fast")
@@ -559,33 +780,43 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     response_made = False
     rt = None
     
+    # Create correction text for test mode
+    test_mode = config.get('test_mode', False)
+    correction_text = None
+    if test_mode:
+        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)", 
+                                         color="black", height=0.5, pos=(0, 3))
+    
+    # Additional elements to draw with the visual stimulus
+    additional_stims = [feedback, instructions]
+    if test_mode and correction_text:
+        additional_stims.append(correction_text)
+    
     # Pre-trial setup
     fixation.draw()
-    feedback.draw()
+    for stim in additional_stims:
+        stim.draw()
     win.flip()
     core.wait(random.uniform(1, 3))
     
     trial_clock = core.Clock()
-    stim_onset = None
+    trial_clock.reset()
+    stim_onset = 0  # We'll reset the clock at stimulus onset
     
-    def draw_visual_stimuli():
+    # Helper functions remain unchanged
+    def get_visual_stim():
         if '_left' in trial_type:
-            visual_stim_left.draw()
+            return visual_stim_left
         elif '_right' in trial_type:
-            visual_stim_right.draw()
+            return visual_stim_right
         elif '_bilateral' in trial_type:
-            visual_stim_left.draw()
-            visual_stim_right.draw()
-    
-    def schedule_audio():
-        if '_left' in trial_type:
-            win.callOnFlip(sound_left.play)
-        elif '_right' in trial_type:
-            win.callOnFlip(sound_right.play)
-        elif '_bilateral' in trial_type:
-            win.callOnFlip(sound_left.play)
-            win.callOnFlip(sound_right.play)
-    
+            return None
+        return None
+
+    def draw_bilateral():
+        visual_stim_left.draw()
+        visual_stim_right.draw()
+        
     # Present stimulus
     if 'audiovisual' in trial_type:
         # Stop any playing sounds
@@ -594,109 +825,228 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
         
         if av_sync <= 0:  # Audio first or simultaneous
             if av_sync == 0:  # Truly simultaneous
-                fixation.draw()
-                draw_visual_stimuli()
-                feedback.draw()
-                win.callOnFlip(trial_clock.reset)
-                schedule_audio()
-                win.flip()
-                stim_onset = 0  # Clock was just reset
-                
-                # Continue visual for remaining frames
-                for frame in range(VISUAL_FRAMES-1):
+                # For bilateral stimuli
+                if '_bilateral' in trial_type:
+                    # Reset the clock first
                     fixation.draw()
-                    draw_visual_stimuli()
-                    feedback.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.callOnFlip(trial_clock.reset)
                     win.flip()
+                    
+                    # Now start visual and audio together
+                    fixation.draw()
+                    draw_bilateral()
+                    for stim in additional_stims:
+                        stim.draw()
+                    
+                    # Schedule audio
+                    if '_left' in trial_type:
+                        win.callOnFlip(sound_left.play)
+                    elif '_right' in trial_type:
+                        win.callOnFlip(sound_right.play)
+                    else:  # bilateral
+                        win.callOnFlip(sound_left.play)
+                        win.callOnFlip(sound_right.play)
+                    
+                    win.flip()
+                    
+                    # Use our new robust method to ensure visual presentation
+                    # Create a temporary custom function for bilateral presentation
+                    def draw_bilateral_with_fixation():
+                        fixation.draw()
+                        draw_bilateral()
+                        for stim in additional_stims:
+                            stim.draw()
+                        
+                    # We handle this special case with a loop because ensure_visual_presentation 
+                    # expects a single visual stim object
+                    for frame in range(VISUAL_FRAMES - 1):
+                        fixation.draw()
+                        draw_bilateral()
+                        for stim in additional_stims:
+                            stim.draw()
+                        win.flip()
+                else:
+                    # Single stimulus case - use our robust methods
+                    visual_stim = get_visual_stim()
+                    
+                    # Reset the clock first
+                    fixation.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.callOnFlip(trial_clock.reset)
+                    win.flip()
+                    
+                    # Now start visual and audio together
+                    fixation.draw()
+                    visual_stim.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    
+                    # Schedule audio
+                    if '_left' in trial_type:
+                        win.callOnFlip(sound_left.play)
+                    elif '_right' in trial_type:
+                        win.callOnFlip(sound_right.play)
+                    
+                    win.flip()
+                    
+                    # Use robust presentation for remaining frames
+                    ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+                        
             else:  # Audio leads
-                # Audio first
+                # Play audio first
                 fixation.draw()
-                feedback.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.callOnFlip(trial_clock.reset)
-                schedule_audio()
-                win.flip()
-                stim_onset = 0  # Audio onset is our reference time
                 
-                # Wait precise number of frames
+                if '_left' in trial_type:
+                    win.callOnFlip(sound_left.play)
+                elif '_right' in trial_type:
+                    win.callOnFlip(sound_right.play)
+                else:  # bilateral
+                    win.callOnFlip(sound_left.play)
+                    win.callOnFlip(sound_right.play)
+                
+                win.flip()
+                
+                # Wait for SOA
                 frames_to_wait = round(abs(av_sync/1000.0) / frame_dur)
                 for frame in range(frames_to_wait):
                     fixation.draw()
-                    feedback.draw() 
+                    for stim in additional_stims:
+                        stim.draw()
                     win.flip()
+                
+                # Show visual for full duration
+                if '_bilateral' in trial_type:
+                    # Bilateral case - use manual drawing with a guaranteed frame rate
+                    for frame in range(VISUAL_FRAMES):
+                        fixation.draw()
+                        draw_bilateral()
+                        for stim in additional_stims:
+                            stim.draw()
+                        win.flip(clearBuffer=True)
+                else:
+                    # Single visual stimulus - use our robust method
+                    visual_stim = get_visual_stim()
+                    ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
                     
-                # Then show visual
-                for frame in range(VISUAL_FRAMES):
-                    fixation.draw()
-                    draw_visual_stimuli()
-                    feedback.draw()
-                    win.flip()
-        else:  # Visual first (positive av_sync)
+        else:  # Visual first
             # Start with visual
-            fixation.draw()
-            draw_visual_stimuli()
-            feedback.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            stim_onset = 0  # Visual onset is reference time
-            
-            # Show visual for its duration
-            for frame in range(VISUAL_FRAMES-1):
+            if '_bilateral' in trial_type:
                 fixation.draw()
-                draw_visual_stimuli()
-                feedback.draw()
+                draw_bilateral()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(trial_clock.reset)
                 win.flip()
+                
+                # Bilateral case - use manual drawing with a guaranteed frame rate
+                for frame in range(VISUAL_FRAMES - 1):
+                    fixation.draw()
+                    draw_bilateral()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.flip(clearBuffer=True)
+            else:
+                visual_stim = get_visual_stim()
+                fixation.draw()
+                visual_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(trial_clock.reset)
+                win.flip()
+                
+                # Use robust presentation for remaining frames
+                ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
             
-            # Calculate frames to wait before audio
-            frames_to_wait = round((av_sync/1000.0 - (VISUAL_FRAMES * frame_dur)) / frame_dur)
-            frames_to_wait = max(0, frames_to_wait)  # Ensure non-negative
+            # Calculate time to wait before audio
+            frames_to_wait = round((av_sync/1000.0) / frame_dur)
             
+            # Wait until audio should start
             for frame in range(frames_to_wait):
                 fixation.draw()
-                feedback.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.flip()
             
-            # Play audio with precise timing
+            # Play audio
             fixation.draw()
-            feedback.draw()
-            win.callOnFlip(schedule_audio)
+            for stim in additional_stims:
+                stim.draw()
+            
+            if '_left' in trial_type:
+                win.callOnFlip(sound_left.play)
+            elif '_right' in trial_type:
+                win.callOnFlip(sound_right.play)
+            else:  # bilateral
+                win.callOnFlip(sound_left.play)
+                win.callOnFlip(sound_right.play)
+            
             win.flip()
     
     elif 'visual' in trial_type:
         # Visual only trial
-        fixation.draw()
-        draw_visual_stimuli()
-        feedback.draw()
-        win.callOnFlip(trial_clock.reset)
-        win.flip()
-        stim_onset = 0
-        
-        for frame in range(VISUAL_FRAMES-1):
+        if '_bilateral' in trial_type:
             fixation.draw()
-            draw_visual_stimuli()
-            feedback.draw()
+            draw_bilateral()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
+            
+            # Bilateral case - use manual drawing with a guaranteed frame rate
+            for frame in range(VISUAL_FRAMES - 1):
+                fixation.draw()
+                draw_bilateral()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
+        else:
+            visual_stim = get_visual_stim()
+            fixation.draw()
+            visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            
+            # Use robust presentation for remaining frames
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
     
     elif 'audio' in trial_type:
         # Audio only trial
         fixation.draw()
-        feedback.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.callOnFlip(trial_clock.reset)
-        schedule_audio()
-        win.flip()
-        stim_onset = 0
         
-        # Keep showing fixation
-        for frame in range(VISUAL_FRAMES):
+        if '_left' in trial_type:
+            win.callOnFlip(sound_left.play)
+        elif '_right' in trial_type:
+            win.callOnFlip(sound_right.play)
+        else:  # bilateral
+            win.callOnFlip(sound_left.play)
+            win.callOnFlip(sound_right.play)
+        
+        win.flip()
+        
+        # Show fixation for consistent duration
+        for frame in range(VISUAL_FRAMES - 1):
             fixation.draw()
-            feedback.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.flip()
     
     # Response collection
     response_window = 2.0  # Allow 2 seconds for response
-    
     while (trial_clock.getTime()) < response_window and not response_made:
         fixation.draw()
-        feedback.draw()
+        for stim in additional_stims:
+            stim.draw()
         win.flip()
         
         keys = event.getKeys(['space', 'escape'], timeStamped=trial_clock)
@@ -725,81 +1075,112 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     adjusted_soa = soa + av_sync
     print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
     
+    # Create SOA display text for test mode
+    test_mode = config.get('test_mode', False)
+    soa_text = None
+    if test_mode:
+        # Format test mode display text depending on trial type
+        if trial_type == 'audiovisual':
+            side_marker = "L" if side == "left" else "R"
+            if soa < 0:  # Audio first
+                soa_display = f"A{side_marker}{abs(soa)}V{side_marker}"
+            elif soa > 0:  # Visual first
+                soa_display = f"V{side_marker}{soa}A{side_marker}"
+            else:  # Simultaneous
+                soa_display = f"AV-SYNC-{side_marker}"
+        elif trial_type == 'visual':
+            first_marker = "L" if side == "left" else "R"
+            second_marker = "R" if side == "left" else "L"
+            if soa == 0:
+                soa_display = "V-SYNC"
+            else:
+                soa_display = f"V{first_marker}{abs(soa)}V{second_marker}"
+        else:  # auditory
+            first_marker = "L" if side == "left" else "R"
+            second_marker = "R" if side == "left" else "L"
+            if soa == 0:
+                soa_display = "A-SYNC"
+            else:
+                soa_display = f"A{first_marker}{abs(soa)}A{second_marker}"
+        
+        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (corr: {av_sync}ms)", 
+                                  color="black", height=0.5, pos=(0, 3))
+    
     response_made = False
     rt = None
     response = -1
     
+    # Additional elements to draw
+    additional_stims = [instructions, trial_counter]
+    if test_mode and soa_text:
+        additional_stims.append(soa_text)
+    
     # Pre-trial setup
     fixation.draw()
-    instructions.draw()
-    trial_counter.draw()
+    for stim in additional_stims:
+        stim.draw()
     win.flip()
     core.wait(random.uniform(1, 2))
     
     trial_clock = core.Clock()
-    trial_clock.reset()
+    visual_duration = VISUAL_FRAMES * frame_dur  # Ensure consistent duration
+    soa_frames = int(abs(adjusted_soa/1000.0) / frame_dur)
     
+    # Handle different trial types
     if trial_type == 'visual':
         if side == 'left':
             first_stim, second_stim = visual_stim_left, visual_stim_right
         else:
             first_stim, second_stim = visual_stim_right, visual_stim_left
         
-        # Visual simultaneous or sequential presentation
         if soa == 0:  # Simultaneous
-            win.callOnFlip(trial_clock.reset)
+            # Show both stimuli for full duration
             fixation.draw()
             first_stim.draw()
             second_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
             
-            for frame in range(VISUAL_FRAMES-1):
+            # Use a custom function for bilateral stimulus presentation since
+            # we can't use ensure_visual_presentation with multiple stimuli
+            for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
                 first_stim.draw()
                 second_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)  # Force clean frame rendering
         else:  # Sequential
             # First stimulus
-            win.callOnFlip(trial_clock.reset)
             fixation.draw()
             first_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
             
-            for frame in range(VISUAL_FRAMES-1):
+            # Use robust presentation for first stimulus
+            ensure_visual_presentation(first_stim, VISUAL_FRAMES - 1, additional_stims)
+            
+            # Gap period if SOA > duration
+            frames_gap = max(0, soa_frames - VISUAL_FRAMES)
+            for frame in range(frames_gap):
                 fixation.draw()
-                first_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
+                for stim in additional_stims:
+                    stim.draw()
                 win.flip()
             
-            # Wait for SOA using frame-based timing
-            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
-            for frame in range(frames_to_wait):
-                fixation.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
-            
-            # Second stimulus
+            # Second stimulus gets full duration with robust presentation
             fixation.draw()
             second_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.flip()
             
-            for frame in range(VISUAL_FRAMES-1):
-                fixation.draw()
-                second_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
-            
+            ensure_visual_presentation(second_stim, VISUAL_FRAMES - 1, additional_stims)
+    
     elif trial_type == 'auditory':
         # Stop any playing sounds
         sound_left.stop()
@@ -812,36 +1193,48 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         
         if soa == 0:  # Simultaneous
             fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.callOnFlip(first_sound.play)
             win.callOnFlip(second_sound.play)
             win.flip()
-        else:  # Sequential
-            # First sound
-            fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(first_sound.play)
-            win.flip()
             
-            # Wait for SOA using frame-based timing
-            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
-            for frame in range(frames_to_wait):
+            # Show fixation for consistent duration
+            for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
-            
-            # Second sound
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)  # Force clean frame rendering
+        else:  # Sequential
             fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.callOnFlip(first_sound.play)
+            win.flip()
+            
+            # Wait for SOA with clean frame rendering
+            for frame in range(soa_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
+            
+            # Play second sound
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.callOnFlip(second_sound.play)
             win.flip()
             
+            # Show fixation for consistent duration with clean frame rendering
+            for frame in range(VISUAL_FRAMES - 1):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
+    
     elif trial_type == 'audiovisual':
         # Stop any playing sounds
         sound_left.stop()
@@ -852,88 +1245,86 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         else:
             visual_stim, sound_stim = visual_stim_right, sound_right
         
-        if adjusted_soa <= 0:  # Audio first or simultaneous
-            if adjusted_soa == 0:  # Truly simultaneous
-                fixation.draw()
-                visual_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.callOnFlip(trial_clock.reset)
-                win.callOnFlip(sound_stim.play)
-                win.flip()
-                
-                for frame in range(VISUAL_FRAMES-1):
-                    fixation.draw()
-                    visual_stim.draw()
-                    instructions.draw()
-                    trial_counter.draw()
-                    win.flip()
-            else:  # Audio leads
-                # Start with audio
-                fixation.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.callOnFlip(trial_clock.reset)
-                win.callOnFlip(sound_stim.play)
-                win.flip()
-                
-                # Wait for the specified SOA
-                frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
-                for frame in range(frames_to_wait):
-                    fixation.draw()
-                    instructions.draw()
-                    trial_counter.draw()
-                    win.flip()
-                
-                # Show visual
-                for frame in range(VISUAL_FRAMES):
-                    fixation.draw()
-                    visual_stim.draw()
-                    instructions.draw()
-                    trial_counter.draw()
-                    win.flip()
-                
-        else:  # Visual first
-            # Start with visual
-            win.callOnFlip(trial_clock.reset)
+        if adjusted_soa == 0:  # Simultaneous
+            # For simultaneous presentation, we separate the audio and visual
+            # timing to avoid issues that can shorten the visual duration
+            
+            # First, reset clock but don't do anything else yet
             fixation.draw()
-            visual_stim.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
             win.flip()
             
-            # Show visual for its duration
-            for frame in range(VISUAL_FRAMES-1):
-                fixation.draw()
-                visual_stim.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
+            # Now start the visual and audio together
+            fixation.draw()
+            visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(sound_stim.play)
+            win.flip()
             
-            # Wait until it's time for audio
-            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
+            # Use robust presentation for remaining frames
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+                
+        elif adjusted_soa < 0:  # Audio first
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.callOnFlip(sound_stim.play)
+            win.flip()
+            
+            # Wait for SOA with clean frame rendering
+            for frame in range(soa_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
+            
+            # Show visual for full duration using robust presentation
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
+            
+        else:  # Visual first
+            # Start with visual using robust presentation
+            fixation.draw()
+            visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            
+            # Use robust presentation for visual stimulus
+            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+            
+            # Wait additional time if SOA > visual duration
+            frames_to_wait = max(0, soa_frames - VISUAL_FRAMES)
             for frame in range(frames_to_wait):
                 fixation.draw()
-                instructions.draw()
-                trial_counter.draw()
-                win.flip()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
             
             # Play audio
             fixation.draw()
-            instructions.draw()
-            trial_counter.draw()
+            for stim in additional_stims:
+                stim.draw()
             win.callOnFlip(sound_stim.play)
             win.flip()
+            
+            # Show fixation for consistent duration
+            for frame in range(VISUAL_FRAMES - 1):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)
     
-    # Response collection
-    response_window = 2.0
-    response_start = trial_clock.getTime()
-    
-    while (trial_clock.getTime() - response_start) < response_window and not response_made:
+    # Wait for response with clean frame rendering
+    while not response_made:
         fixation.draw()
-        instructions.draw()
-        trial_counter.draw()
-        win.flip()
+        for stim in additional_stims:
+            stim.draw()
+        win.flip(clearBuffer=True)
         
         keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
         if keys:
@@ -945,7 +1336,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 response_made = True
                 print(f"Response: {response} at {rt}s")
     
-    # Ensure all sounds are stopped
+    # Stop all sounds
     sound_left.stop()
     sound_right.stop()
     return response, rt
@@ -1090,7 +1481,9 @@ def run_experiment_series(config):
         
         # Create unique filename for data saving
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        data_filename = f"data_{config['participant_id']}_{config['age']}_{config['gender']}_{config['site']}_{timestamp}.csv"
+        offline_mode = config.get('offline_mode', False)
+        offline_tag = "_offline" if offline_mode else ""
+        data_filename = f"data_{config['participant_id']}_{config['age']}_{config['gender']}_{config['site']}{offline_tag}_{timestamp}.csv"
         print(f"Created data file: {data_filename}")
 
         # Prepare data file with headers
@@ -1105,13 +1498,15 @@ def run_experiment_series(config):
             run_block(block, data_filename, config)
             print(f"Block {i} complete")
             
-            # Upload data after each block
-            if project:
+            # Upload data after each block if not in offline mode
+            if project and not offline_mode:
                 print("\nInitiating REDCap upload...")
                 if os.path.exists(data_filename):
                     upload_csv_to_redcap(data_filename)
                 else:
                     print(f"Data file {data_filename} not found.")
+            elif offline_mode:
+                print("Running in offline mode. Data saved locally.")
             else:
                 print("REDCap project not initialized. Skipping REDCap upload.")
 
@@ -1135,13 +1530,15 @@ def run_experiment_series(config):
         core.wait(1)
         
         # Final upload to ensure everything is saved
-        print("Performing final data upload...")
-        if project and os.path.exists(data_filename):
+        if project and os.path.exists(data_filename) and not offline_mode:
+            print("Performing final data upload...")
             upload_success = upload_csv_to_redcap(data_filename)
             if upload_success:
                 print("Final data upload successful")
             else:
                 print("Final data upload failed")
+        elif offline_mode:
+            print("Experiment completed in offline mode. Data saved locally.")
         
         return data_filename
 
@@ -1202,12 +1599,129 @@ def cleanup():
         core.quit()
 
 # Modify visual stimulus presentation to respect frame timing
-def present_visual_stimulus(visual_stim, duration_frames):
-    """Present a visual stimulus for a specific number of frames"""
-    for frame in range(duration_frames):
+def present_visual_stimulus(visual_stim, duration_frames, additional_stims=None):
+    """Present a visual stimulus for a specific number of frames
+    
+    Returns True if successfully presented for the full duration.
+    Implements robust frame timing to prevent dropped frames.
+    
+    Parameters:
+    -----------
+    visual_stim : visual.BaseVisualStim
+        The primary visual stimulus to draw
+    duration_frames : int
+        Number of frames to display the stimulus
+    additional_stims : list, optional
+        List of additional visual stimuli to draw along with the main stimulus
+    """
+    # Ensure we have at least one frame for visibility
+    duration_frames = max(1, duration_frames)
+    
+    # Create a clock to measure timing
+    frame_clock = core.Clock()
+    frame_times = []
+    
+    # Prepare PsychoPy for consistent timing
+    # Using drawStim method for more direct control
+    win.recordFrameIntervals = True
+    
+    # Start with the minimum elements - first frame
+    fixation.draw()
+    visual_stim.draw()
+    
+    # Draw any additional stimuli if provided
+    if additional_stims:
+        for stim in additional_stims:
+            if stim is not None:
+                stim.draw()
+                
+    # Reset the timer and flip
+    frame_clock.reset()
+    win.flip()
+    frame_times.append(frame_clock.getTime())
+    frames_shown = 1
+    
+    # Remaining frames with robust timing
+    for frame in range(duration_frames - 1):
+        # Critical priority: Draw visual stimulus first
+        fixation.draw()
         visual_stim.draw()
-        win.flip()
-    return True
+        
+        # Draw additional stimuli - always include them for visual timing consistency
+        if additional_stims:
+            for stim in additional_stims:
+                if stim is not None:
+                    stim.draw()
+        
+        # Force a proper frame update with waitBlanking=True to ensure precise timing
+        win.flip(clearBuffer=True)
+        curr_time = frame_clock.getTime()
+        frame_times.append(curr_time)
+        frames_shown += 1
+        
+        # Check if we're falling behind on timing and log it
+        if len(frame_times) >= 2:
+            last_interval = frame_times[-1] - frame_times[-2]
+            if last_interval > frame_dur * 1.5:
+                print(f"WARNING: Possible frame drop detected at frame {frame+1}/{duration_frames}")
+    
+    # Measure the actual duration
+    actual_duration = frame_clock.getTime()
+    expected_duration = duration_frames * frame_dur
+    
+    # Detailed timing analysis
+    frame_intervals = [frame_times[i] - frame_times[i-1] for i in range(1, len(frame_times))]
+    max_interval = max(frame_intervals) if frame_intervals else 0
+    dropped_frames = sum(1 for interval in frame_intervals if interval > frame_dur * 1.5)
+    
+    # Always log timing information for debugging
+    if dropped_frames > 0:
+        print(f"TIMING WARNING: Expected {expected_duration:.4f}s, got {actual_duration:.4f}s")
+        print(f"Frames requested: {duration_frames}, frames shown: {frames_shown}")
+        print(f"Dropped frames: {dropped_frames}")
+        print(f"Max interval: {max_interval:.4f}s (should be ~{frame_dur:.4f}s)")
+        print(f"Frame intervals: {[round(i*1000) for i in frame_intervals]}ms")
+    
+    # Turn off frame recording to avoid memory issues
+    win.recordFrameIntervals = False
+    
+    return dropped_frames == 0  # Return success only if no frames were dropped
+
+def ensure_visual_presentation(visual_stim, duration_frames, additional_stims=None, max_attempts=3):
+    """Ensures visual stimulus is presented properly, retrying if frames are dropped.
+    
+    This function is used when reliable visual presentation is critical.
+    
+    Parameters:
+    -----------
+    visual_stim : visual.BaseVisualStim
+        The primary visual stimulus to draw
+    duration_frames : int
+        Number of frames to display the stimulus
+    additional_stims : list, optional
+        List of additional visual stimuli to draw along with the main stimulus
+    max_attempts : int
+        Maximum number of retry attempts if frames are dropped
+        
+    Returns:
+    --------
+    bool : True if presentation was successful (no dropped frames)
+    """
+    success = False
+    attempts = 0
+    
+    while not success and attempts < max_attempts:
+        success = present_visual_stimulus(visual_stim, duration_frames, additional_stims)
+        attempts += 1
+        if not success and attempts < max_attempts:
+            print(f"Retrying visual presentation (attempt {attempts+1}/{max_attempts})...")
+            # Short delay to let system recover before next attempt
+            core.wait(0.05)
+    
+    if not success:
+        print("WARNING: Could not achieve clean visual presentation after multiple attempts")
+    
+    return success
 
 def upload_csv_to_redcap(csv_filename):
     """Upload CSV file to REDCap as a file attachment if project is available."""
@@ -1216,24 +1730,29 @@ def upload_csv_to_redcap(csv_filename):
             print(f"\nAttempting to upload {csv_filename} to REDCap...")
             print(f"Using record_id: {config['participant_id']}")
             
-            # Create a record with the file
-            record = {
-                'record_id': config['participant_id'],
-                'python_data_file': open(csv_filename, 'rb')
-            }
-
-            print("Record created, attempting import...")
+            # First create/ensure the record exists
+            record_data = [{
+                'record_id': config['participant_id']
+            }]
+            
             try:
-                response = project.import_records([record])
-                print(f"Raw REDCap response: {response}")
+                # First create or update the record with just the ID
+                project.import_records(record_data)
+                print(f"Created/updated record for ID: {config['participant_id']}")
                 
-                if response and response.get('count') == 1:
-                    print(f"Successfully uploaded {csv_filename} to REDCap")
-                    return True
-                else:
-                    print(f"Upload failed - unexpected response: {response}")
-                    return False
-                    
+                # Now upload the file as a separate operation
+                with open(csv_filename, 'rb') as file_obj:
+                    file_content = file_obj.read()
+                    response = project.import_file(
+                        record=config['participant_id'],
+                        field='python_data_file',
+                        file_name=os.path.basename(csv_filename),
+                        file_content=file_content
+                    )
+                
+                print(f"Successfully uploaded {csv_filename} to REDCap")
+                return True
+                
             except redcap.RedcapError as e:
                 print(f"REDCap API error: {str(e)}")
                 return False
@@ -1244,11 +1763,6 @@ def upload_csv_to_redcap(csv_filename):
             import traceback
             print(traceback.format_exc())
             return False
-        finally:
-            # Ensure file is closed
-            if 'record' in locals() and hasattr(record['python_data_file'], 'close'):
-                record['python_data_file'].close()
-                print("File handle closed")
     else:
         print("REDCap project not initialized. Skipping REDCap upload.")
         return False
@@ -1283,3 +1797,5 @@ def check_sound_files():
 
 # Call the function before running the experiment
 check_sound_files()
+
+

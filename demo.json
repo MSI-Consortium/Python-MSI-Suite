@@ -1,0 +1,45 @@
+{
+  "participant_id": "041",
+  "age": 4,
+  "gender": "m",
+  "site": "vandy",
+  "fullscreen": false,
+  "test_mode": true,
+  "offline_mode": true,
+  "api_url": "https://redcap.vumc.org/api/",
+  "api_token": "431BE2520C4538EFEB6100975D3D451C",
+  "av_sync_correction": 0.0,
+  "blocks": [
+    {
+      "experiment": "SRT",
+      "block_number": 1,
+      "trials_per_condition": 1,
+      "total_trials": 3,
+      "estimated_time": 0.1
+    },
+    {
+      "experiment": "SJ",
+      "block_number": 2,
+      "trials_per_condition": 1,
+      "total_trials": 13,
+      "estimated_time": 0.4
+    },
+    {
+      "experiment": "SRT_Mod",
+      "block_number": 3,
+      "trials_per_condition": 1,
+      "total_trials": 9,
+      "estimated_time": 0.2,
+      "left_audio_high": false,
+      "left_visual_green": false
+    },
+    {
+      "experiment": "SJ_Mod",
+      "block_number": 4,
+      "trials_per_condition": 1,
+      "total_trials": 54,
+      "estimated_time": 1.8
+    }
+  ],
+  "total_estimated_time": 2.5
+}

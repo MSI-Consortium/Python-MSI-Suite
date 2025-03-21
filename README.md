@@ -84,6 +84,32 @@ api_token=your_api_token_here
 
 **Note:** If you do not provide REDCap API credentials, you can still run the program offline. The data will be saved locally without being uploaded to REDCap.
 
+## Setting Up REDCap API
+
+To integrate the application with REDCap, follow these steps:
+
+1. **Receive REDCap Invitation**
+   - You will receive an invitation to access the REDCap project. Follow the instructions in the invitation to create your account and log in.
+
+2. **Obtain Your API Token**
+   - Once logged in, navigate to the "API" section in the REDCap interface. This can be accessed by clicking on the "API" button highlighted in the `api_menu.png` file.
+   - In the API section, you will find your API token. Copy this token as it will be required for the application.
+
+3. **Find Your API URL**
+   - Click on the "REDCap API documentation" link in the API section. This will take you to the documentation page.
+   - On the documentation page, locate the URL for the API, as shown in the `redcap_url.png` file. Copy this URL.
+
+4. **Configure the Application**
+   - Create a file named `api_text.txt` in the root directory of the application.
+   - Add the following lines to the file, replacing `your_redcap_url` and `your_api_token_here` with the URL and token you obtained:
+
+     ```text
+     api_url=https://your_redcap_url/api/
+     api_token=your_api_token_here
+     ```
+
+   - Save the file. The application will now use these credentials to connect to REDCap.
+
 ## Usage
 ### Launching the Experiment Configuration GUI
 Run the following command in your terminal:
