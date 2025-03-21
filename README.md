@@ -1,7 +1,8 @@
 # Python MSI Suite
+   ![Main Interface Menu](docs/images/main_interface_image.png)
 This repository contains a Python-based application for running customized multi-block psychophysical experiments. The experiments are designed to measure sensory processing and reaction times under various audiovisual conditions. The application provides a GUI for configuring experiments and supports data collection and integration with REDCap for data management.
 
-![Main Interface](docs/images/main_interface_image.png)
+
 ## Table of Contents
 - [Features](#features)
 - [Prerequisites](#prerequisites)
