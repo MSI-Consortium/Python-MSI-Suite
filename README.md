@@ -94,17 +94,17 @@ To integrate the application with REDCap, follow these steps:
 2. **Obtain Your API Token**
    - Once logged in, navigate to the "API" section in the REDCap interface. This can be accessed by clicking on the "API" button highlighted in the image below:
    
-   ![API Menu](api_menu.png)
+   ![API Menu](docs/images/api_menu.png)
    
    - In the API section, you will find your API token. Copy this token as it will be required for the application:
    
-   ![REDCap API](redcap_api.png)
+   ![REDCap API](docs/images/redcap_api.png)
 
 3. **Find Your API URL**
    - Click on the "REDCap API documentation" link in the API section. This will take you to the documentation page.
    - On the documentation page, locate the URL for the API, as shown below:
    
-   ![REDCap URL](redcap_url.png)
+   ![REDCap URL](docs/images/redcap_url.png)
 
 4. **Configure the Application**
    - Create a file named `api_text.txt` in the root directory of the application.
