@@ -58,10 +58,12 @@ Support for Various Experiment Types: Including Simultaneity Judgment (SJ), Simp
 
    ```bash
    conda env create -f environment.yaml
-   conda activate python-suite
+   conda activate msi-suite
+   pip install uv
+   uv pip install psychopy
    ```
 
-   This command creates a new conda environment named `python-suite` with all the required packages specified in `environment.yaml`.
+   This command creates a new conda environment named `msi-suite` with all the required packages specified in `environment.yaml`.
 
 3. **(Optional) Install Additional Packages**
 
@@ -71,7 +73,7 @@ Support for Various Experiment Types: Including Simultaneity Judgment (SJ), Simp
    pip install -r requirements.txt
    ```
 
-   *(Note: Ensure that you are in the `python-suite` environment when running this command.)*
+   *(Note: Ensure that you are in the `msi-suite` environment when running this command.)*
 
 Configure REDCap API Credentials *(Optional)*
 
