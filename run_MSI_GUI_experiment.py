@@ -28,6 +28,16 @@ import numpy as np
 import redcap
 import subprocess  # Add this import at the top
 
+# Try to import psychtoolbox for precise audio scheduling
+# PTB prescheduling allows sub-ms precision by preparing audio buffers in advance
+PTB_AVAILABLE = False
+try:
+    import psychtoolbox as ptb
+    PTB_AVAILABLE = True
+    print("PTB prescheduling: Available (sub-ms precision)")
+except ImportError:
+    print("PTB prescheduling: Not available (using callOnFlip fallback ~5ms precision)")
+
 def load_config(config_file):
     with open(config_file, 'r') as f:
         return json.load(f)
@@ -421,6 +431,50 @@ def get_reliable_framerate(win, fallback_fps=60.0):
     print("     and consider hardcoding it if detection consistently fails.")
     return fallback_fps
 
+def schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+    """
+    Schedule a sound to play at a precise time using PTB prescheduling.
+
+    PTB prescheduling allows the audio system to prepare buffers in advance,
+    resulting in sub-ms precision instead of ~5ms with callOnFlip.
+
+    Parameters:
+    -----------
+    win : visual.Window
+        The PsychoPy window (needed for getFutureFlipTime)
+    sound_stim : sound.Sound
+        The sound stimulus to schedule
+    delay_seconds : float
+        Additional delay after the next flip (in seconds)
+
+    Returns:
+    --------
+    bool : True if prescheduling was used, False if falling back to callOnFlip
+    """
+    if not PTB_AVAILABLE or sound_stim is None:
+        # Fallback: use callOnFlip (will be called by the caller)
+        return False
+
+    try:
+        # Get the time of the next screen flip in PTB clock format
+        next_flip_time = win.getFutureFlipTime(clock='ptb')
+
+        if next_flip_time is None:
+            return False
+
+        # Calculate target audio onset time
+        target_time = next_flip_time + delay_seconds
+
+        # Schedule the sound to play at exactly that time
+        # PTB will prepare buffers in advance and account for hardware latency
+        sound_stim.play(when=target_time)
+        return True
+
+    except Exception as e:
+        # If anything goes wrong, caller will use callOnFlip fallback
+        print(f"PTB prescheduling failed: {e}, using callOnFlip fallback")
+        return False
+
 def wait_precise_duration(duration_ms, timing_clock=None):
     """
     Wait for a precise duration using time-based method instead of frames.
@@ -581,7 +635,7 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
         wait_precise_duration(visual_duration_ms, trial_clock)
             
     elif stimulus_type == 'audiovisual':
-        # Audiovisual with AV sync correction
+        # Audiovisual with AV sync correction using PTB prescheduling when available
         if av_sync == 0:  # Truly simultaneous
             # Reset clock first
             fixation.draw()
@@ -590,7 +644,7 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                     stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.flip()
-            
+
             # Now start visual and audio together
             fixation.draw()
             if visual_stim:
@@ -598,25 +652,31 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
             for stim in additional_stims:
                 if stim:
                     stim.draw()
+
+            # Try PTB prescheduling for sub-ms precision, fall back to callOnFlip
             if sound_stim:
-                win.callOnFlip(sound_stim.play)
+                if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                    win.callOnFlip(sound_stim.play)
             win.flip()
             stim_onset = trial_clock.getTime()
-            
+
             # Use time-based presentation for remaining duration
             remaining_duration = visual_duration_ms - (trial_clock.getTime() - stim_onset) * 1000
             if remaining_duration > 0:
                 present_stimulus_with_hybrid_timing(visual_stim, remaining_duration, additional_stims, trial_clock)
                 
         elif av_sync < 0:  # Audio first (negative correction)
-            # Play audio first
+            # Play audio first with PTB prescheduling for precise onset
             fixation.draw()
             for stim in additional_stims:
                 if stim:
                     stim.draw()
             win.callOnFlip(trial_clock.reset)
+
+            # Try PTB prescheduling, fall back to callOnFlip
             if sound_stim:
-                win.callOnFlip(sound_stim.play)
+                if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                    win.callOnFlip(sound_stim.play)
             win.flip()
 
             # Wait for corrected SOA using frame-based timing (more precise)
@@ -647,8 +707,18 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
             # Present visual for full duration using time-based method
             present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
 
-            # Wait for audio onset using frame-based timing (more precise)
+            # Calculate audio delay and try to preschedule
+            # Audio should play after wait_frames from now
             wait_frames = calculate_soa_frames(av_sync, frame_dur)
+            audio_delay_seconds = wait_frames * frame_dur
+
+            # Try PTB prescheduling - schedule audio before starting frame wait
+            # This gives PTB maximum time to prepare buffers
+            prescheduled = False
+            if sound_stim and audio_delay_seconds > 0.01:  # Only preschedule if delay > 10ms
+                prescheduled = schedule_sound_at_flip(win, sound_stim, delay_seconds=audio_delay_seconds)
+
+            # Wait for audio onset using frame-based timing
             for frame in range(wait_frames):
                 fixation.draw()
                 for stim in additional_stims:
@@ -656,14 +726,15 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                         stim.draw()
                 win.flip()
 
-            # Play audio
-            fixation.draw()
-            for stim in additional_stims:
-                if stim:
-                    stim.draw()
-            if sound_stim:
-                win.callOnFlip(sound_stim.play)
-            win.flip()
+            # If prescheduling wasn't used, play audio now with callOnFlip
+            if not prescheduled:
+                fixation.draw()
+                for stim in additional_stims:
+                    if stim:
+                        stim.draw()
+                if sound_stim:
+                    win.callOnFlip(sound_stim.play)
+                win.flip()
     
     return stim_onset
 
@@ -1318,35 +1389,43 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         else:
             first_sound, second_sound = sound_right, sound_left
         
-        if soa == 0:  # Simultaneous
+        if soa == 0:  # Simultaneous bilateral audio
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(first_sound.play)
-            win.callOnFlip(second_sound.play)
+
+            # Try PTB prescheduling for both sounds
+            if not schedule_sound_at_flip(win, first_sound, delay_seconds=0.0):
+                win.callOnFlip(first_sound.play)
+            if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
+                win.callOnFlip(second_sound.play)
             win.flip()
-            
+
             # Show fixation for consistent duration using time-based method
             wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
-        else:  # Sequential
+        else:  # Sequential bilateral audio
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(first_sound.play)
+
+            # Try PTB prescheduling for first sound
+            if not schedule_sound_at_flip(win, first_sound, delay_seconds=0.0):
+                win.callOnFlip(first_sound.play)
             win.flip()
-            
+
             # Wait for SOA using precise timing
             wait_precise_duration(abs(soa), trial_clock)
-            
-            # Play second sound
+
+            # Play second sound with prescheduling
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
-            win.callOnFlip(second_sound.play)
+            if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
+                win.callOnFlip(second_sound.play)
             win.flip()
-            
+
             # Show fixation for consistent duration using time-based method
             wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
     
@@ -1360,42 +1439,46 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         else:
             visual_stim, sound_stim = visual_stim_right, sound_right
         
-        if adjusted_soa == 0:  # Simultaneous
+        if adjusted_soa == 0:  # Simultaneous audiovisual
             # For simultaneous presentation, we separate the audio and visual
             # timing to avoid issues that can shorten the visual duration
-            
+
             # First, reset clock but don't do anything else yet
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.flip()
-            
-            # Now start the visual and audio together
+
+            # Now start the visual and audio together with PTB prescheduling
             fixation.draw()
             visual_stim.draw()
             for stim in additional_stims:
                 stim.draw()
-            win.callOnFlip(sound_stim.play)
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
             win.flip()
-            
+
             # Use time-based presentation for remaining frames
             present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
-                
+
         elif adjusted_soa < 0:  # Audio first
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)
+
+            # Try PTB prescheduling for audio onset
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
             win.flip()
-            
+
             # Wait for SOA using precise timing
             wait_precise_duration(abs(adjusted_soa), trial_clock)
-            
+
             # Show visual for full duration using time-based method
             present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
-            
+
         else:  # Visual first
             # Start with visual using robust presentation
             fixation.draw()
@@ -1404,22 +1487,23 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.flip()
-            
+
             # Use time-based presentation for visual stimulus
             present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
-            
+
             # Wait additional time if SOA > visual duration
             wait_time = max(0, abs(adjusted_soa) - (VISUAL_STIM_DURATION * 1000))
             if wait_time > 0:
                 wait_precise_duration(wait_time, trial_clock)
-            
-            # Play audio
+
+            # Play audio with PTB prescheduling
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
-            win.callOnFlip(sound_stim.play)
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
             win.flip()
-            
+
             # Show fixation for consistent duration using time-based method
             wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
     

@@ -40,6 +40,15 @@ prefs.general['audioDevice'] = 'default'
 # Initialize sound system
 sound.init()
 
+# Try to import psychtoolbox for precise audio scheduling
+PTB_AVAILABLE = False
+try:
+    import psychtoolbox as ptb
+    PTB_AVAILABLE = True
+    print("PTB prescheduling: Available (sub-ms precision)")
+except ImportError:
+    print("PTB prescheduling: Not available (using callOnFlip fallback ~5ms precision)")
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -151,6 +160,48 @@ def get_reliable_framerate(win, fallback_fps=60.0):
 
     print(f"All methods failed. Using fallback: {fallback_fps} Hz")
     return fallback_fps
+
+
+def schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+    """
+    Schedule a sound to play at a precise time using PTB prescheduling.
+
+    PTB prescheduling allows the audio system to prepare buffers in advance,
+    resulting in sub-ms precision instead of ~5ms with callOnFlip.
+
+    Parameters:
+    -----------
+    win : visual.Window
+        The PsychoPy window (needed for getFutureFlipTime)
+    sound_stim : sound.Sound
+        The sound stimulus to schedule
+    delay_seconds : float
+        Additional delay after the next flip (in seconds)
+
+    Returns:
+    --------
+    bool : True if prescheduling was used, False if falling back to callOnFlip
+    """
+    if not PTB_AVAILABLE or sound_stim is None:
+        return False
+
+    try:
+        # Get the time of the next screen flip in PTB clock format
+        next_flip_time = win.getFutureFlipTime(clock='ptb')
+
+        if next_flip_time is None:
+            return False
+
+        # Calculate target audio onset time
+        target_time = next_flip_time + delay_seconds
+
+        # Schedule the sound to play at exactly that time
+        sound_stim.play(when=target_time)
+        return True
+
+    except Exception as e:
+        print(f"PTB prescheduling failed: {e}, using callOnFlip fallback")
+        return False
 
 
 # ============================================================================
@@ -323,6 +374,8 @@ def main():
     def present_av_stimulus(av_sync_ms, correction_ms=0):
         """Present audiovisual stimulus with specified AV sync offset using frame-based timing.
 
+        Uses PTB prescheduling when available for sub-ms audio timing precision.
+
         Args:
             av_sync_ms: Base AV sync value from test condition
             correction_ms: User-entered correction to apply (added to av_sync_ms)
@@ -337,7 +390,10 @@ def main():
             fixation.draw()
             visual_stim.draw()
             win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)
+
+            # Try PTB prescheduling for sub-ms precision
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
             win.flip()
 
             # Continue visual presentation
@@ -348,9 +404,18 @@ def main():
 
         elif total_av_sync > 0:
             # Visual first (positive): show visual, wait, then play audio
+            # Calculate total delay for audio: visual frames + wait frames
+            wait_frames = calculate_soa_frames(total_av_sync, frame_dur)
+            total_audio_delay = (VISUAL_FRAMES + wait_frames) * frame_dur
+
             fixation.draw()
             visual_stim.draw()
             win.callOnFlip(trial_clock.reset)
+
+            # Try to preschedule audio at the calculated future time
+            prescheduled = False
+            if total_audio_delay > 0.01:  # Only preschedule if delay > 10ms
+                prescheduled = schedule_sound_at_flip(win, sound_stim, delay_seconds=total_audio_delay)
             win.flip()
 
             # Continue visual presentation
@@ -360,20 +425,23 @@ def main():
                 win.flip()
 
             # Wait for audio onset using frame-based timing
-            wait_frames = calculate_soa_frames(total_av_sync, frame_dur)
             for frame in range(wait_frames):
                 fixation.draw()
                 win.flip()
 
-            # Play audio
-            win.callOnFlip(sound_stim.play)
-            win.flip()
+            # If prescheduling wasn't used, play audio now
+            if not prescheduled:
+                win.callOnFlip(sound_stim.play)
+                win.flip()
 
         else:
             # Audio first (negative): play audio, wait, then show visual
             fixation.draw()
             win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)
+
+            # Try PTB prescheduling for audio onset
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
             win.flip()
 
             # Wait for visual onset using frame-based timing
