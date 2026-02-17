@@ -19,8 +19,15 @@ from psychopy import prefs
 prefs.hardware['audioLib'] = ['PTB']  # Using only PTB (PsychToolbox) as it's most reliable
 prefs.general['audioDevice'] = 'default'  # Use system default audio device
 
+def get_audio_lib_name():
+    """Get audio library name, handling different PsychoPy versions."""
+    try:
+        return sound.audioLib
+    except AttributeError:
+        return prefs.hardware['audioLib']
+
 print("\nAudio Configuration:")
-print(f"Selected Audio Library: {sound.audioLib}")
+print(f"Selected Audio Library: {get_audio_lib_name()}")
 print(f"Audio Device: {prefs.general['audioDevice']}")
 sound.init()  # Explicitly initialize sound system
 
@@ -773,7 +780,7 @@ def create_sound(filename, duration):
     try:
         filepath = os.path.join(os.path.dirname(__file__), filename)
         print(f"\nAttempting to create sound: {filepath}")
-        print(f"Using audio library: {sound.audioLib}")
+        print(f"Using audio library: {get_audio_lib_name()}")
         
         # Create sound with PTB backend
         try:
@@ -791,7 +798,7 @@ def create_sound(filename, duration):
         except Exception as e:
             print(f"Error creating sound: {e}")
             print("Sound system details:")
-            print(f"Audio library: {sound.audioLib}")
+            print(f"Audio library: {get_audio_lib_name()}")
             if os.path.exists(filepath):
                 print(f"Sound file exists at {filepath}")
             else:

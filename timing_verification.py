@@ -208,12 +208,19 @@ def schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
 # MAIN SCRIPT
 # ============================================================================
 
+def get_audio_lib_name():
+    """Get audio library name, handling different PsychoPy versions."""
+    try:
+        return sound.audioLib
+    except AttributeError:
+        return prefs.hardware['audioLib']
+
 def main():
     print("\n" + "=" * 60)
     print("TIMING VERIFICATION SCRIPT")
     print("=" * 60)
     print(f"Platform: {'Mac' if RUNNING_ON_MAC else 'Windows/Linux'}")
-    print(f"Audio library: {sound.audioLib}")
+    print(f"Audio library: {get_audio_lib_name()}")
     print("=" * 60)
 
     # Set up monitor

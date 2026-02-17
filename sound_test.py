@@ -7,7 +7,13 @@ from psychopy import sound, core
 
 print("Audio preferences set.")
 sound.init()  # Initialize sound system now that prefs are set
-print(f"Audio Library Used: {sound.audioLib}")
+
+# Handle different PsychoPy versions for audioLib attribute
+try:
+    audio_lib = sound.audioLib
+except AttributeError:
+    audio_lib = prefs.hardware['audioLib']
+print(f"Audio Library Used: {audio_lib}")
 print(f"Available Audio Devices: {sound.getDevices()}")
 
 print("Playing a 440Hz tone for 1 second...")
