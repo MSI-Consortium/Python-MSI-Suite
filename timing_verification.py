@@ -37,8 +37,11 @@ from psychopy import prefs
 prefs.hardware['audioLib'] = ['PTB']
 prefs.general['audioDevice'] = 'default'
 
-# Initialize sound system
-sound.init()
+# Initialize sound system (not available in all PsychoPy versions)
+try:
+    sound.init()
+except AttributeError:
+    pass  # Sound system initializes automatically when creating Sound objects
 
 # Try to import psychtoolbox for precise audio scheduling
 PTB_AVAILABLE = False

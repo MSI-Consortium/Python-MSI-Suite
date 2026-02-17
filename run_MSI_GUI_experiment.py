@@ -29,7 +29,12 @@ def get_audio_lib_name():
 print("\nAudio Configuration:")
 print(f"Selected Audio Library: {get_audio_lib_name()}")
 print(f"Audio Device: {prefs.general['audioDevice']}")
-sound.init()  # Explicitly initialize sound system
+
+# Initialize sound system (not available in all PsychoPy versions)
+try:
+    sound.init()
+except AttributeError:
+    pass  # Sound system initializes automatically when creating Sound objects
 
 import numpy as np
 import redcap
