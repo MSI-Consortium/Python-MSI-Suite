@@ -691,6 +691,9 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                     win.callOnFlip(sound_stim.play)
             win.flip()
 
+            # Capture stim_onset at AUDIO onset (first stimulus) for proper RT measurement
+            stim_onset = trial_clock.getTime()
+
             # Wait for corrected SOA using frame-based timing (more precise)
             wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
             for frame in range(wait_frames):
@@ -700,8 +703,7 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                         stim.draw()
                 win.flip()
 
-            # Present visual for full duration - capture stim_onset at actual visual onset
-            stim_onset = trial_clock.getTime()
+            # Present visual for full duration
             present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
                 
         else:  # Visual first (positive correction)
@@ -1128,6 +1130,9 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 win.callOnFlip(sound_right.play)
                 win.flip()
 
+                # Capture stim_onset at AUDIO onset (first stimulus) for proper RT measurement
+                stim_onset = trial_clock.getTime()
+
                 # Wait for SOA using frame-based timing
                 wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
                 for frame in range(wait_frames):
@@ -1136,14 +1141,13 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                         stim.draw()
                     win.flip()
 
-                # Present bilateral visual - capture stim_onset at actual visual onset
+                # Present bilateral visual
                 fixation.draw()
                 visual_stim_left.draw()
                 visual_stim_right.draw()
                 for stim in additional_stims:
                     stim.draw()
                 win.flip()
-                stim_onset = trial_clock.getTime()  # Capture at actual visual onset
 
                 # Continue visual presentation for remaining frames
                 for frame in range(VISUAL_FRAMES - 1):
@@ -1664,9 +1668,13 @@ def run_block(block_config, data_filename, config):
                 feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nToo fast or too slow! Invalid response."
 
         # Save data
+        # Get av_sync correction and calculate adjusted RT for cross-modal comparisons
+        av_sync = config.get('av_sync_correction', 0.0)
+        adjusted_rt = get_adjusted_rt(rt, str(trial_type), av_sync)
+
         trial_data = [
-            participant_id, age, gender, site, block_number, trial_num, 
-            trial_type, soa, side, response, rt, timestamp, exp_type
+            participant_id, age, gender, site, block_number, trial_num,
+            trial_type, soa, side, response, rt, adjusted_rt, av_sync, timestamp, exp_type
         ]
         with open(data_filename, 'a', newline='') as csvfile:
             csv.writer(csvfile).writerow(trial_data)
@@ -1697,8 +1705,9 @@ def run_experiment_series(config):
         # Prepare data file with headers
         with open(data_filename, 'w', newline='') as csvfile:
             csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(['Participant_ID', 'Age', 'Gender', 'Site', 'Block_Number', 'Trial_Number', 
-                              'Trial_Type', 'SOA', 'Side', 'Response', 'Reaction_Time', 'Timestamp', 'Experiment'])
+            csvwriter.writerow(['Participant_ID', 'Age', 'Gender', 'Site', 'Block_Number', 'Trial_Number',
+                              'Trial_Type', 'SOA', 'Side', 'Response', 'Reaction_Time', 'Adjusted_RT',
+                              'AV_Sync_Correction', 'Timestamp', 'Experiment'])
         
         print(f"Starting {len(config['blocks'])} blocks...")
         for i, block in enumerate(config['blocks'], 1):
@@ -2016,6 +2025,60 @@ def calculate_soa_frames(soa_ms, frame_dur):
     - More consistent than time-based waits which can overshoot
     """
     return max(0, round(abs(soa_ms/1000.0) / frame_dur))
+
+
+def get_adjusted_rt(raw_rt, trial_type, av_sync_ms):
+    """Adjust RT to account for hardware latency differences between modalities.
+
+    This normalizes all RTs to a common reference point, enabling valid
+    cross-modal comparisons (V vs A vs AV).
+
+    The adjustment removes the extra latency from whichever modality is slower:
+    - If av_sync > 0: visual is slower, subtract av_sync from V and AV trials
+    - If av_sync < 0: audio is slower, subtract |av_sync| from A and AV trials
+
+    After adjustment, all RTs represent "time from when the faster modality
+    would have reached the participant."
+
+    Args:
+        raw_rt: Raw reaction time in seconds (can be None for missed responses)
+        trial_type: Trial type string (e.g., 'visual', 'audio', 'audiovisual',
+                    'visual_left', 'audio_bilateral', etc.)
+        av_sync_ms: AV sync correction in milliseconds
+                    (positive = visual slower, negative = audio slower)
+
+    Returns:
+        Adjusted RT in seconds, or None if raw_rt is None
+    """
+    if raw_rt is None:
+        return None
+
+    av_sync_sec = av_sync_ms / 1000.0  # Convert to seconds
+
+    # Determine trial modality from trial_type string
+    # Note: SJ_Mod uses 'auditory' while SRT uses 'audio', so check for both
+    trial_lower = trial_type.lower()
+    has_visual = 'visual' in trial_lower
+    has_audio = 'audio' in trial_lower or 'auditory' in trial_lower
+
+    is_visual_only = has_visual and not has_audio
+    is_audio_only = has_audio and not has_visual
+    is_audiovisual = 'audiovisual' in trial_lower or (has_audio and has_visual)
+
+    if is_visual_only:
+        # Visual-only: adjust only if visual is slower (av_sync > 0)
+        adjustment = max(0, av_sync_sec)
+    elif is_audio_only:
+        # Audio-only: adjust only if audio is slower (av_sync < 0)
+        adjustment = max(0, -av_sync_sec)
+    elif is_audiovisual:
+        # Audiovisual: always measured from slower modality (first triggered)
+        adjustment = abs(av_sync_sec)
+    else:
+        # Unknown trial type, no adjustment
+        adjustment = 0
+
+    return raw_rt - adjustment
 
 
 
