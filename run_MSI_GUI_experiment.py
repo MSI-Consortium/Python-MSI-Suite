@@ -747,7 +747,15 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                 if sound_stim:
                     win.callOnFlip(sound_stim.play)
                 win.flip()
-    
+
+            # Wait for audio to finish playing (same duration as visual stimulus)
+            for frame in range(VISUAL_FRAMES):
+                fixation.draw()
+                for stim in additional_stims:
+                    if stim:
+                        stim.draw()
+                win.flip()
+
     return stim_onset
 
 # Create window with Mac-specific settings

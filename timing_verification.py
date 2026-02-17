@@ -444,6 +444,11 @@ def main():
                 win.callOnFlip(sound_stim.play)
                 win.flip()
 
+            # Wait for audio to finish playing (same duration as visual stimulus)
+            for frame in range(VISUAL_FRAMES):
+                fixation.draw()
+                win.flip()
+
         else:
             # Audio first (negative): play audio, wait, then show visual
             fixation.draw()
