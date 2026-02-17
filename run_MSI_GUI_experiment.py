@@ -356,25 +356,333 @@ mon.setWidth(32)
 mon.setDistance(distance)
 mon.setSizePix((win_width, win_height))
 
+# Robust timing functions (must be defined before use)
+def get_reliable_framerate(win, fallback_fps=60.0):
+    """Get reliable framerate with multiple fallback methods.
+
+    Uses multiple detection strategies:
+    1. getActualFrameRate() with relaxed parameters
+    2. getMsPerFrame() as backup (measures over 60+ frames)
+    3. Fallback to specified fps if all methods fail
+
+    See: https://www.psychopy.org/api/visual/window.html
+    """
+    print("\nMeasuring monitor refresh rate...")
+
+    # Method 1: Try getActualFrameRate with relaxed parameters
+    # Using more warmup frames and relaxed threshold for better reliability
+    try:
+        # First attempt: standard parameters
+        fps = win.getActualFrameRate(
+            nIdentical=10,
+            nMaxFrames=100,
+            nWarmUpFrames=20,  # More warmup for system stabilization
+            threshold=2  # Relaxed threshold (2ms instead of 1ms)
+        )
+        if fps and 30 <= fps <= 240:
+            print(f"Method 1 (getActualFrameRate): {fps:.2f} Hz")
+            return fps
+    except Exception as e:
+        print(f"Method 1 failed: {e}")
+
+    # Method 2: Try getMsPerFrame (more robust, measures over 60+ frames)
+    try:
+        print("Trying alternative method (getMsPerFrame)...")
+        # getMsPerFrame returns (avg_ms, std_ms, median_ms)
+        timing_stats = win.getMsPerFrame(nFrames=60, showVisual=False)
+        if timing_stats and len(timing_stats) >= 1:
+            avg_ms = timing_stats[0]
+            if avg_ms and 4 <= avg_ms <= 40:  # 25Hz to 250Hz range
+                fps = 1000.0 / avg_ms
+                std_ms = timing_stats[1] if len(timing_stats) > 1 else 0
+                print(f"Method 2 (getMsPerFrame): {fps:.2f} Hz (avg: {avg_ms:.2f}ms, std: {std_ms:.2f}ms)")
+
+                # Warn if high variability
+                if std_ms > 2:
+                    print(f"  WARNING: High frame timing variability ({std_ms:.2f}ms). V-sync may be off.")
+                return fps
+    except Exception as e:
+        print(f"Method 2 failed: {e}")
+
+    # Method 3: Try to get from monitor configuration
+    try:
+        mon_fps = win.monitorFramePeriod
+        if mon_fps and mon_fps > 0:
+            fps = 1.0 / mon_fps
+            if 30 <= fps <= 240:
+                print(f"Method 3 (monitorFramePeriod): {fps:.2f} Hz")
+                return fps
+    except Exception as e:
+        print(f"Method 3 failed: {e}")
+
+    # All methods failed - use fallback
+    print(f"All framerate detection methods failed. Using fallback: {fallback_fps} Hz")
+    print("TIP: For accurate timing, manually verify your monitor's refresh rate")
+    print("     and consider hardcoding it if detection consistently fails.")
+    return fallback_fps
+
+def wait_precise_duration(duration_ms, timing_clock=None):
+    """
+    Wait for a precise duration using time-based method instead of frames.
+    
+    Parameters:
+    -----------
+    duration_ms : float
+        Duration to wait in milliseconds
+    timing_clock : core.Clock, optional
+        Clock to use for timing measurements
+        
+    Returns:
+    --------
+    float : actual duration waited
+    """
+    if timing_clock is None:
+        timing_clock = core.Clock()
+    
+    target_duration = duration_ms / 1000.0
+    start_time = timing_clock.getTime()
+    
+    # Use core.wait for precise timing
+    core.wait(target_duration)
+    
+    actual_duration = timing_clock.getTime() - start_time
+    
+    # Log timing accuracy
+    error = abs(actual_duration - target_duration)
+    if error > 0.005:  # 5ms tolerance
+        print(f"Timing warning: requested {target_duration*1000:.1f}ms, got {actual_duration*1000:.1f}ms (error: {error*1000:.1f}ms)")
+    
+    return actual_duration
+
+def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_stims=None, timing_clock=None):
+    """
+    Present visual stimulus using hybrid timing (frames + time verification).
+    
+    This combines frame-based presentation for smoothness with time-based 
+    verification for accuracy, and doesn't rely solely on framerate.
+    
+    Parameters:
+    -----------
+    visual_stim : visual stimulus object
+        The visual stimulus to present
+    duration_ms : float
+        Target duration in milliseconds
+    additional_stims : list, optional
+        Additional stimuli to draw
+    timing_clock : core.Clock, optional
+        Clock for timing measurements
+        
+    Returns:
+    --------
+    float : actual presentation duration in seconds
+    """
+    if additional_stims is None:
+        additional_stims = []
+    if timing_clock is None:
+        timing_clock = core.Clock()
+    
+    target_duration = duration_ms / 1000.0
+    start_time = timing_clock.getTime()
+    
+    # Initial presentation
+    fixation.draw()
+    if visual_stim:
+        visual_stim.draw()
+    for stim in additional_stims:
+        if stim:
+            stim.draw()
+    win.flip()
+    
+    # Continue presentation until target time is reached
+    while (timing_clock.getTime() - start_time) < target_duration:
+        fixation.draw()
+        if visual_stim:
+            visual_stim.draw()
+        for stim in additional_stims:
+            if stim:
+                stim.draw()
+        win.flip()
+    
+    actual_duration = timing_clock.getTime() - start_time
+    
+    # Log timing accuracy
+    error = abs(actual_duration - target_duration)
+    if error > 0.01:  # 10ms tolerance for visual presentation
+        print(f"Visual timing warning: requested {duration_ms:.1f}ms, got {actual_duration*1000:.1f}ms (error: {error*1000:.1f}ms)")
+    
+    return actual_duration
+
+def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, av_sync, additional_stims=None, trial_clock=None):
+    """
+    Standardized stimulus presentation with AV sync correction using frame-based timing.
+
+    IMPORTANT: AV sync correction (av_sync parameter) is ONLY applied to 'audiovisual' trials.
+    For 'visual' or 'audio' only trials, the av_sync parameter is ignored since both stimuli
+    go through the same hardware pathway and don't need cross-modal correction.
+
+    Frame-based timing is used for AV sync delays because:
+    - Visual stimuli can only appear at monitor refresh boundaries
+    - Quantizing to frames matches hardware reality
+    - More consistent than time-based waits (which can overshoot by ~17ms at 60Hz)
+
+    Parameters:
+    -----------
+    stimulus_type : str
+        'visual', 'audio', or 'audiovisual'
+    visual_stim : visual stimulus object or None
+    sound_stim : sound stimulus object or None
+    av_sync : float
+        AV sync correction in milliseconds (positive = visual earlier, negative = audio earlier).
+        Only applied for audiovisual trials.
+    additional_stims : list
+        Additional stimuli to draw (instructions, feedback, etc.)
+    trial_clock : core.Clock
+        Clock object for timing measurements
+
+    Returns:
+    --------
+    float : stimulus onset time relative to trial_clock reset
+    """
+    if additional_stims is None:
+        additional_stims = []
+        
+    if trial_clock is None:
+        trial_clock = core.Clock()
+    
+    stim_onset = 0
+    visual_duration_ms = VISUAL_STIM_DURATION * 1000  # Convert to milliseconds
+    
+    if stimulus_type == 'visual':
+        # Visual only - no AV sync correction needed
+        fixation.draw()
+        for stim in additional_stims:
+            if stim:
+                stim.draw()
+        win.callOnFlip(trial_clock.reset)
+        win.flip()
+        stim_onset = trial_clock.getTime()
+        
+        # Use time-based presentation
+        present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
+            
+    elif stimulus_type == 'audio':
+        # Audio only - no AV sync correction needed
+        fixation.draw()
+        for stim in additional_stims:
+            if stim:
+                stim.draw()
+        win.callOnFlip(trial_clock.reset)
+        if sound_stim:
+            win.callOnFlip(sound_stim.play)
+        win.flip()
+        stim_onset = trial_clock.getTime()
+        
+        # Wait for consistent duration (matching visual)
+        wait_precise_duration(visual_duration_ms, trial_clock)
+            
+    elif stimulus_type == 'audiovisual':
+        # Audiovisual with AV sync correction
+        if av_sync == 0:  # Truly simultaneous
+            # Reset clock first
+            fixation.draw()
+            for stim in additional_stims:
+                if stim:
+                    stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            
+            # Now start visual and audio together
+            fixation.draw()
+            if visual_stim:
+                visual_stim.draw()
+            for stim in additional_stims:
+                if stim:
+                    stim.draw()
+            if sound_stim:
+                win.callOnFlip(sound_stim.play)
+            win.flip()
+            stim_onset = trial_clock.getTime()
+            
+            # Use time-based presentation for remaining duration
+            remaining_duration = visual_duration_ms - (trial_clock.getTime() - stim_onset) * 1000
+            if remaining_duration > 0:
+                present_stimulus_with_hybrid_timing(visual_stim, remaining_duration, additional_stims, trial_clock)
+                
+        elif av_sync < 0:  # Audio first (negative correction)
+            # Play audio first
+            fixation.draw()
+            for stim in additional_stims:
+                if stim:
+                    stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            if sound_stim:
+                win.callOnFlip(sound_stim.play)
+            win.flip()
+
+            # Wait for corrected SOA using frame-based timing (more precise)
+            wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+            for frame in range(wait_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    if stim:
+                        stim.draw()
+                win.flip()
+
+            # Present visual for full duration - capture stim_onset at actual visual onset
+            stim_onset = trial_clock.getTime()
+            present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
+                
+        else:  # Visual first (positive correction)
+            # Start with visual
+            fixation.draw()
+            if visual_stim:
+                visual_stim.draw()
+            for stim in additional_stims:
+                if stim:
+                    stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            stim_onset = trial_clock.getTime()
+
+            # Present visual for full duration using time-based method
+            present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
+
+            # Wait for audio onset using frame-based timing (more precise)
+            wait_frames = calculate_soa_frames(av_sync, frame_dur)
+            for frame in range(wait_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    if stim:
+                        stim.draw()
+                win.flip()
+
+            # Play audio
+            fixation.draw()
+            for stim in additional_stims:
+                if stim:
+                    stim.draw()
+            if sound_stim:
+                win.callOnFlip(sound_stim.play)
+            win.flip()
+    
+    return stim_onset
+
 # Create window with Mac-specific settings
 win = visual.Window([win_width, win_height], 
                    color=[c/255 for c in bg_color], 
                    units="deg", 
                    monitor=mon,
                    **WINDOW_CONFIG)
-# Get frame rate once at startup
-try:
-    actual_fps = win.getActualFrameRate(nIdentical=10, nMaxFrames=100, nWarmUpFrames=10)
-    if actual_fps is None:
-        actual_fps = 60.0  # Common Mac refresh rate
-    frame_dur = 1.0/actual_fps
-except:
-    actual_fps = 60.0
-    frame_dur = 1.0/60.0
+# Get frame rate using robust detection method
+# Use predicted_framerate from config as fallback if auto-detection fails
+fallback_fps = config.get('predicted_framerate', 60)
+actual_fps = get_reliable_framerate(win, fallback_fps=fallback_fps)
+frame_dur = 1.0/actual_fps
 
 print(f"Using refresh rate: {actual_fps}Hz")
 VISUAL_FRAMES = max(1, int(VISUAL_STIM_DURATION * actual_fps))
 print(f"Frames per stimulus: {VISUAL_FRAMES}")
+print(f"Note: Timing will use hybrid frame+time-based methods for reliability")
 
 # Create common stimuli
 fixation = visual.ShapeStim(win, 
@@ -470,10 +778,10 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     soa_text = None
     if test_mode:
         # Basic SOA display
-        if soa < 0:
-            soa_display = f"A{abs(soa)}V"
-        elif soa > 0:
-            soa_display = f"V{soa}A"
+        if adjusted_soa < 0:
+            soa_display = f"A{abs(adjusted_soa)}V"
+        elif adjusted_soa > 0:
+            soa_display = f"V{adjusted_soa}A"
         else:
             soa_display = "SYNC"
             
@@ -485,10 +793,9 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
             timing_indicator = f"Visual shifted later by {abs(av_sync)}ms →"
         
         # Full display text showing both SOA and correction effect
-        display_text = f"{soa_display} (corr: {av_sync}ms)\n{timing_indicator}"
+        display_text = f"{soa_display} (orig SOA: {soa}ms, corr: {av_sync}ms)\n{timing_indicator}"
         soa_text = visual.TextStim(win, text=display_text, color="black", height=0.5, pos=(0, 3))
     
-    # Rest of function remains unchanged
     response_made = False
     rt = None
     response = -1
@@ -507,53 +814,35 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     
     trial_clock = core.Clock()
     
-    # Ensure visual stimulus duration is constant
-    visual_duration = VISUAL_FRAMES * frame_dur
+    # Use time-based stimulus presentation with SOA timing
+    visual_duration_ms = VISUAL_STIM_DURATION * 1000
     
-    if adjusted_soa <= 0:  # Audio first or simultaneous
-        if adjusted_soa == 0:  # Truly simultaneous
-            # For simultaneous presentation, play audio in a separate step
-            # to avoid timing issues that can shorten the visual stimulus
-            
-            # First, reset the clock but don't play audio yet
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            
-            # Now draw visual and play audio
-            fixation.draw()
-            visual_stim.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(sound_stim.play)
-            win.flip()
-            
-            # Use robust presentation for remaining frames
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+    if adjusted_soa == 0:
+        # Simultaneous presentation
+        stim_onset = present_stimulus_with_robust_timing(
+            stimulus_type='audiovisual',
+            visual_stim=visual_stim,
+            sound_stim=sound_stim,
+            av_sync=0,  # No additional correction since SOA already includes it
+            additional_stims=additional_stims,
+            trial_clock=trial_clock
+        )
+    elif adjusted_soa < 0:
+        # Audio first
+        fixation.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.callOnFlip(trial_clock.reset)
+        win.callOnFlip(sound_stim.play)
+        win.flip()
         
-        else:  # Audio leads
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.callOnFlip(sound_stim.play)
-            win.flip()
-            
-            # Wait for SOA
-            frames_to_wait = round(abs(adjusted_soa/1000.0) / frame_dur)
-            for frame in range(frames_to_wait):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip()
-            
-            # Use robust presentation for visual stimulus
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
-    
-    else:  # Visual first
-        # Show visual for its full duration
+                        # Wait for adjusted SOA using precise timing
+        wait_precise_duration(abs(adjusted_soa), trial_clock)
+        
+        # Present visual stimulus using time-based method
+        present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
+    else:
+        # Visual first
         fixation.draw()
         visual_stim.draw()
         for stim in additional_stims:
@@ -561,18 +850,13 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
         win.callOnFlip(trial_clock.reset)
         win.flip()
         
-        # Use robust presentation for remaining frames
-        ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+        # Present visual for full duration using time-based method
+        present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
         
-        # Wait until time to play audio
-        frames_to_wait = round((adjusted_soa/1000.0 - visual_duration) / frame_dur)
-        frames_to_wait = max(0, frames_to_wait)
-        
-        for frame in range(frames_to_wait):
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.flip()
+        # Wait for adjusted SOA (minus visual duration if needed)
+        wait_time = max(0, adjusted_soa - visual_duration_ms)
+        if wait_time > 0:
+            wait_precise_duration(wait_time, trial_clock)
         
         # Play audio
         fixation.draw()
@@ -630,133 +914,16 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     core.wait(foreperiod)
     
     trial_clock = core.Clock()
-    trial_clock.reset()
-    stim_onset = None
     
-    # Present stimulus
-    if trial_type == 'audiovisual':
-        print(f"Starting AV stimulus with {av_sync}ms offset")
-        if av_sync <= 0:  # Audio first or simultaneous
-            if av_sync == 0:  # Truly simultaneous
-                # First, reset the clock but don't play audio yet
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.callOnFlip(trial_clock.reset)
-                win.flip()
-                
-                # Now draw visual and play audio together
-                fixation.draw()
-                visual_stim.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.callOnFlip(sound_stim.play)
-                win.flip()
-                stim_onset = trial_clock.getTime()
-                
-                # Use our robust presentation method for remaining frames
-                ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
-            
-            else:  # Audio leads
-                print("Playing audio")
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.callOnFlip(trial_clock.reset)
-                win.callOnFlip(sound_stim.play)
-                win.flip()
-                
-                # Wait for SOA
-                wait_frames = round(abs(av_sync/1000.0) / frame_dur)
-                for frame in range(wait_frames):
-                    fixation.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    win.flip()
-                
-                # Show visual for full duration using our robust method
-                stim_onset = trial_clock.getTime()
-                ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
-                
-        else:  # Visual first
-            # Start with visual
-            fixation.draw()
-            visual_stim.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            stim_onset = trial_clock.getTime()
-            
-            # Use robust presentation for remaining visual frames
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
-            
-            # Calculate frames to wait before audio
-            frames_to_wait = round((av_sync/1000.0) / frame_dur)
-            
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            stim_onset = trial_clock.getTime()
-            
-            # Ensure full VISUAL_FRAMES duration
-            for frame in range(VISUAL_FRAMES - 1):
-                fixation.draw()
-                visual_stim.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip()
-            
-            # Calculate frames to wait before audio
-            frames_to_wait = round((av_sync/1000.0) / frame_dur)
-            
-            # Wait until audio should start
-            for frame in range(frames_to_wait):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip()
-            
-            # Play audio
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(sound_stim.play)
-            win.flip()
-            
-    elif trial_type == 'visual':
-        # Visual only trial
-        fixation.draw()
-        visual_stim.draw()
-        for stim in additional_stims:
-            stim.draw()
-        win.callOnFlip(trial_clock.reset)
-        win.flip()
-        stim_onset = trial_clock.getTime()
-        
-        # Ensure full VISUAL_FRAMES duration
-        for frame in range(VISUAL_FRAMES - 1):
-            fixation.draw()
-            visual_stim.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.flip()
-            
-    else:  # audio
-        print("Starting audio stimulus")
-        fixation.draw()
-        for stim in additional_stims:
-            stim.draw()
-        win.callOnFlip(trial_clock.reset)
-        win.callOnFlip(sound_stim.play)
-        win.flip()
-        stim_onset = trial_clock.getTime()
-        
-        # Show fixation for consistent duration (matching visual)
-        for frame in range(VISUAL_FRAMES - 1):
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.flip()
+    # Use robust time-based stimulus presentation
+    stim_onset = present_stimulus_with_robust_timing(
+        stimulus_type=trial_type,
+        visual_stim=visual_stim,
+        sound_stim=sound_stim,
+        av_sync=av_sync,
+        additional_stims=additional_stims,
+        trial_clock=trial_clock
+    )
     
     # Response collection
     response_window = 2.0  # Allow 2 seconds for response
@@ -811,250 +978,199 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     core.wait(random.uniform(1, 3))
     
     trial_clock = core.Clock()
-    trial_clock.reset()
-    stim_onset = 0  # We'll reset the clock at stimulus onset
     
-    # Helper functions remain unchanged
+    # Helper functions to determine stimuli
     def get_visual_stim():
         if '_left' in trial_type:
             return visual_stim_left
         elif '_right' in trial_type:
             return visual_stim_right
-        elif '_bilateral' in trial_type:
-            return None
         return None
-
-    def draw_bilateral():
-        visual_stim_left.draw()
-        visual_stim_right.draw()
-        
-    # Present stimulus
+    
+    def get_sound_stim():
+        if '_left' in trial_type:
+            return sound_left
+        elif '_right' in trial_type:
+            return sound_right
+        return None
+    
+    # Stop any playing sounds first
+    sound_left.stop()
+    sound_right.stop()
+    
+    # Determine stimulus type and get appropriate stimuli
     if 'audiovisual' in trial_type:
-        # Stop any playing sounds
-        sound_left.stop()
-        sound_right.stop()
-        
-        if av_sync <= 0:  # Audio first or simultaneous
-            if av_sync == 0:  # Truly simultaneous
-                # For bilateral stimuli
-                if '_bilateral' in trial_type:
-                    # Reset the clock first
-                    fixation.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    win.callOnFlip(trial_clock.reset)
-                    win.flip()
-                    
-                    # Now start visual and audio together
-                    fixation.draw()
-                    draw_bilateral()
-                    for stim in additional_stims:
-                        stim.draw()
-                    
-                    # Schedule audio
-                    if '_left' in trial_type:
-                        win.callOnFlip(sound_left.play)
-                    elif '_right' in trial_type:
-                        win.callOnFlip(sound_right.play)
-                    else:  # bilateral
-                        win.callOnFlip(sound_left.play)
-                        win.callOnFlip(sound_right.play)
-                    
-                    win.flip()
-                    
-                    # Use our new robust method to ensure visual presentation
-                    # Create a temporary custom function for bilateral presentation
-                    def draw_bilateral_with_fixation():
-                        fixation.draw()
-                        draw_bilateral()
-                        for stim in additional_stims:
-                            stim.draw()
-                        
-                    # We handle this special case with a loop because ensure_visual_presentation 
-                    # expects a single visual stim object
-                    for frame in range(VISUAL_FRAMES - 1):
-                        fixation.draw()
-                        draw_bilateral()
-                        for stim in additional_stims:
-                            stim.draw()
-                        win.flip()
-                else:
-                    # Single stimulus case - use our robust methods
-                    visual_stim = get_visual_stim()
-                    
-                    # Reset the clock first
-                    fixation.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    win.callOnFlip(trial_clock.reset)
-                    win.flip()
-                    
-                    # Now start visual and audio together
-                    fixation.draw()
-                    visual_stim.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    
-                    # Schedule audio
-                    if '_left' in trial_type:
-                        win.callOnFlip(sound_left.play)
-                    elif '_right' in trial_type:
-                        win.callOnFlip(sound_right.play)
-                    
-                    win.flip()
-                    
-                    # Use robust presentation for remaining frames
-                    ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
-                        
-            else:  # Audio leads
-                # Play audio first
+        if '_bilateral' in trial_type:
+            # Special case for bilateral stimuli - handle manually
+            if av_sync == 0:  # Simultaneous
                 fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.callOnFlip(trial_clock.reset)
-                
-                if '_left' in trial_type:
-                    win.callOnFlip(sound_left.play)
-                elif '_right' in trial_type:
-                    win.callOnFlip(sound_right.play)
-                else:  # bilateral
-                    win.callOnFlip(sound_left.play)
-                    win.callOnFlip(sound_right.play)
-                
-                win.flip()
-                
-                # Wait for SOA
-                frames_to_wait = round(abs(av_sync/1000.0) / frame_dur)
-                for frame in range(frames_to_wait):
-                    fixation.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    win.flip()
-                
-                # Show visual for full duration
-                if '_bilateral' in trial_type:
-                    # Bilateral case - use manual drawing with a guaranteed frame rate
-                    for frame in range(VISUAL_FRAMES):
-                        fixation.draw()
-                        draw_bilateral()
-                        for stim in additional_stims:
-                            stim.draw()
-                        win.flip(clearBuffer=True)
-                else:
-                    # Single visual stimulus - use our robust method
-                    visual_stim = get_visual_stim()
-                    ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
-                    
-        else:  # Visual first
-            # Start with visual
-            if '_bilateral' in trial_type:
-                fixation.draw()
-                draw_bilateral()
                 for stim in additional_stims:
                     stim.draw()
                 win.callOnFlip(trial_clock.reset)
                 win.flip()
                 
-                # Bilateral case - use manual drawing with a guaranteed frame rate
+                # Start visual and audio together
+                fixation.draw()
+                visual_stim_left.draw()
+                visual_stim_right.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(sound_left.play)
+                win.callOnFlip(sound_right.play)
+                win.flip()
+                stim_onset = trial_clock.getTime()
+                
+                # Present bilateral visual for remaining frames
                 for frame in range(VISUAL_FRAMES - 1):
                     fixation.draw()
-                    draw_bilateral()
+                    visual_stim_left.draw()
+                    visual_stim_right.draw()
                     for stim in additional_stims:
                         stim.draw()
-                    win.flip(clearBuffer=True)
-            else:
-                visual_stim = get_visual_stim()
+                    win.flip()
+            elif av_sync < 0:  # Audio first
                 fixation.draw()
-                visual_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(trial_clock.reset)
+                win.callOnFlip(sound_left.play)
+                win.callOnFlip(sound_right.play)
+                win.flip()
+
+                # Wait for SOA using frame-based timing
+                wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+                for frame in range(wait_frames):
+                    fixation.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.flip()
+
+                # Present bilateral visual - capture stim_onset at actual visual onset
+                fixation.draw()
+                visual_stim_left.draw()
+                visual_stim_right.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip()
+                stim_onset = trial_clock.getTime()  # Capture at actual visual onset
+
+                # Continue visual presentation for remaining frames
+                for frame in range(VISUAL_FRAMES - 1):
+                    fixation.draw()
+                    visual_stim_left.draw()
+                    visual_stim_right.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.flip()
+            else:  # Visual first
+                fixation.draw()
+                visual_stim_left.draw()
+                visual_stim_right.draw()
                 for stim in additional_stims:
                     stim.draw()
                 win.callOnFlip(trial_clock.reset)
                 win.flip()
+                stim_onset = trial_clock.getTime()
                 
-                # Use robust presentation for remaining frames
-                ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+                # Present bilateral visual for remaining frames
+                for frame in range(VISUAL_FRAMES - 1):
+                    fixation.draw()
+                    visual_stim_left.draw()
+                    visual_stim_right.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.flip()
+                
+                # Wait then play audio
+                wait_frames = calculate_soa_frames(av_sync, frame_dur)
+                for frame in range(wait_frames):
+                    fixation.draw()
+                    for stim in additional_stims:
+                        stim.draw()
+                    win.flip()
+                
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.callOnFlip(sound_left.play)
+                win.callOnFlip(sound_right.play)
+                win.flip()
+        else:
+            # Single-sided audiovisual - use robust timing function
+            visual_stim = get_visual_stim()
+            sound_stim = get_sound_stim()
+            stim_onset = present_stimulus_with_robust_timing(
+                stimulus_type='audiovisual',
+                visual_stim=visual_stim,
+                sound_stim=sound_stim,
+                av_sync=av_sync,
+                additional_stims=additional_stims,
+                trial_clock=trial_clock
+            )
             
-            # Calculate time to wait before audio
-            frames_to_wait = round((av_sync/1000.0) / frame_dur)
+    elif 'visual' in trial_type:
+        if '_bilateral' in trial_type:
+            # Bilateral visual
+            fixation.draw()
+            visual_stim_left.draw()
+            visual_stim_right.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+            stim_onset = trial_clock.getTime()
             
-            # Wait until audio should start
-            for frame in range(frames_to_wait):
+            for frame in range(VISUAL_FRAMES - 1):
+                fixation.draw()
+                visual_stim_left.draw()
+                visual_stim_right.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip()
+        else:
+            # Single-sided visual - use robust timing function
+            visual_stim = get_visual_stim()
+            stim_onset = present_stimulus_with_robust_timing(
+                stimulus_type='visual',
+                visual_stim=visual_stim,
+                sound_stim=None,
+                av_sync=0,  # Not applicable for visual-only
+                additional_stims=additional_stims,
+                trial_clock=trial_clock
+            )
+            
+    elif 'audio' in trial_type:
+        if '_bilateral' in trial_type:
+            # Bilateral audio
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.callOnFlip(sound_left.play)
+            win.callOnFlip(sound_right.play)
+            win.flip()
+            stim_onset = trial_clock.getTime()
+            
+            for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
                 for stim in additional_stims:
                     stim.draw()
                 win.flip()
-            
-            # Play audio
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            
-            if '_left' in trial_type:
-                win.callOnFlip(sound_left.play)
-            elif '_right' in trial_type:
-                win.callOnFlip(sound_right.play)
-            else:  # bilateral
-                win.callOnFlip(sound_left.play)
-                win.callOnFlip(sound_right.play)
-            
-            win.flip()
-    
-    elif 'visual' in trial_type:
-        # Visual only trial
-        if '_bilateral' in trial_type:
-            fixation.draw()
-            draw_bilateral()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            
-            # Bilateral case - use manual drawing with a guaranteed frame rate
-            for frame in range(VISUAL_FRAMES - 1):
-                fixation.draw()
-                draw_bilateral()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
         else:
-            visual_stim = get_visual_stim()
-            fixation.draw()
-            visual_stim.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.callOnFlip(trial_clock.reset)
-            win.flip()
-            
-            # Use robust presentation for remaining frames
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
-    
-    elif 'audio' in trial_type:
-        # Audio only trial
-        fixation.draw()
-        for stim in additional_stims:
-            stim.draw()
-        win.callOnFlip(trial_clock.reset)
-        
-        if '_left' in trial_type:
-            win.callOnFlip(sound_left.play)
-        elif '_right' in trial_type:
-            win.callOnFlip(sound_right.play)
-        else:  # bilateral
-            win.callOnFlip(sound_left.play)
-            win.callOnFlip(sound_right.play)
-        
-        win.flip()
-        
-        # Show fixation for consistent duration
-        for frame in range(VISUAL_FRAMES - 1):
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            win.flip()
+            # Single-sided audio - use robust timing function
+            sound_stim = get_sound_stim()
+            stim_onset = present_stimulus_with_robust_timing(
+                stimulus_type='audio',
+                visual_stim=None,
+                sound_stim=sound_stim,
+                av_sync=0,  # Not applicable for audio-only
+                additional_stims=additional_stims,
+                trial_clock=trial_clock
+            )
     
     # Response collection
-    response_window = 2.0  # Allow 2 seconds for response
-    while (trial_clock.getTime()) < response_window and not response_made:
+    response_window = 2.0
+    while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
         fixation.draw()
         for stim in additional_stims:
             stim.draw()
@@ -1065,7 +1181,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
             if key[0] == 'escape':
                 cleanup()
             elif key[0] == 'space':
-                rt = key[1]  # Already relative to stim_onset since we reset clock at stimulus
+                rt = key[1] - stim_onset
                 response_made = True
                 print(f"Response at {rt}s")
                 break
@@ -1093,10 +1209,10 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         # Format test mode display text depending on trial type
         if trial_type == 'audiovisual':
             side_marker = "L" if side == "left" else "R"
-            if soa < 0:  # Audio first
-                soa_display = f"A{side_marker}{abs(soa)}V{side_marker}"
-            elif soa > 0:  # Visual first
-                soa_display = f"V{side_marker}{soa}A{side_marker}"
+            if adjusted_soa < 0:  # Audio first (use adjusted SOA for display)
+                soa_display = f"A{side_marker}{abs(adjusted_soa)}V{side_marker}"
+            elif adjusted_soa > 0:  # Visual first
+                soa_display = f"V{side_marker}{adjusted_soa}A{side_marker}"
             else:  # Simultaneous
                 soa_display = f"AV-SYNC-{side_marker}"
         elif trial_type == 'visual':
@@ -1114,7 +1230,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             else:
                 soa_display = f"A{first_marker}{abs(soa)}A{second_marker}"
         
-        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (corr: {av_sync}ms)", 
+        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (orig: {soa}ms, corr: {av_sync}ms)", 
                                   color="black", height=0.5, pos=(0, 3))
     
     response_made = False
@@ -1135,7 +1251,6 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     
     trial_clock = core.Clock()
     visual_duration = VISUAL_FRAMES * frame_dur  # Ensure consistent duration
-    soa_frames = int(abs(adjusted_soa/1000.0) / frame_dur)
     
     # Handle different trial types
     if trial_type == 'visual':
@@ -1176,6 +1291,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             ensure_visual_presentation(first_stim, VISUAL_FRAMES - 1, additional_stims)
             
             # Gap period if SOA > duration
+            soa_frames = calculate_soa_frames(abs(soa), frame_dur)
             frames_gap = max(0, soa_frames - VISUAL_FRAMES)
             for frame in range(frames_gap):
                 fixation.draw()
@@ -1211,12 +1327,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(second_sound.play)
             win.flip()
             
-            # Show fixation for consistent duration
-            for frame in range(VISUAL_FRAMES - 1):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)  # Force clean frame rendering
+            # Show fixation for consistent duration using time-based method
+            wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
         else:  # Sequential
             fixation.draw()
             for stim in additional_stims:
@@ -1225,12 +1337,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(first_sound.play)
             win.flip()
             
-            # Wait for SOA with clean frame rendering
-            for frame in range(soa_frames):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
+            # Wait for SOA using precise timing
+            wait_precise_duration(abs(soa), trial_clock)
             
             # Play second sound
             fixation.draw()
@@ -1239,12 +1347,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(second_sound.play)
             win.flip()
             
-            # Show fixation for consistent duration with clean frame rendering
-            for frame in range(VISUAL_FRAMES - 1):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
+            # Show fixation for consistent duration using time-based method
+            wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
     
     elif trial_type == 'audiovisual':
         # Stop any playing sounds
@@ -1275,8 +1379,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(sound_stim.play)
             win.flip()
             
-            # Use robust presentation for remaining frames
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+            # Use time-based presentation for remaining frames
+            present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
                 
         elif adjusted_soa < 0:  # Audio first
             fixation.draw()
@@ -1286,15 +1390,11 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(sound_stim.play)
             win.flip()
             
-            # Wait for SOA with clean frame rendering
-            for frame in range(soa_frames):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
+            # Wait for SOA using precise timing
+            wait_precise_duration(abs(adjusted_soa), trial_clock)
             
-            # Show visual for full duration using robust presentation
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES, additional_stims)
+            # Show visual for full duration using time-based method
+            present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
             
         else:  # Visual first
             # Start with visual using robust presentation
@@ -1305,16 +1405,13 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(trial_clock.reset)
             win.flip()
             
-            # Use robust presentation for visual stimulus
-            ensure_visual_presentation(visual_stim, VISUAL_FRAMES - 1, additional_stims)
+            # Use time-based presentation for visual stimulus
+            present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
             
             # Wait additional time if SOA > visual duration
-            frames_to_wait = max(0, soa_frames - VISUAL_FRAMES)
-            for frame in range(frames_to_wait):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
+            wait_time = max(0, abs(adjusted_soa) - (VISUAL_STIM_DURATION * 1000))
+            if wait_time > 0:
+                wait_precise_duration(wait_time, trial_clock)
             
             # Play audio
             fixation.draw()
@@ -1323,12 +1420,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             win.callOnFlip(sound_stim.play)
             win.flip()
             
-            # Show fixation for consistent duration
-            for frame in range(VISUAL_FRAMES - 1):
-                fixation.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip(clearBuffer=True)
+            # Show fixation for consistent duration using time-based method
+            wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
     
     # Wait for response with clean frame rendering
     while not response_made:
@@ -1808,5 +1901,18 @@ def check_sound_files():
 
 # Call the function before running the experiment
 check_sound_files()
+
+# Timing utility function for frame-based SOA calculation
+def calculate_soa_frames(soa_ms, frame_dur):
+    """Convert SOA in milliseconds to number of frames with consistent rounding.
+
+    Frame-based timing is preferred for AV sync corrections because:
+    - Visual stimuli can only appear at monitor refresh boundaries
+    - Quantizing to frames matches hardware reality
+    - More consistent than time-based waits which can overshoot
+    """
+    return max(0, round(abs(soa_ms/1000.0) / frame_dur))
+
+
 
 

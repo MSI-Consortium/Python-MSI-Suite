@@ -199,14 +199,14 @@ class ExperimentConfigApp(QWidget):
         self.av_sync_correction.setSingleStep(1)
         self.av_sync_correction.setSuffix(' ms')
         self.av_sync_correction.setDecimals(2)
-        
+
         # Add tooltip explanation for correction factor
         self.av_sync_correction.setToolTip(
             "Positive values move the visual stimulus earlier (forward) in relation to audio.\n"
             "Negative values move the visual stimulus later (backward) in relation to audio.\n"
             "Example: +100ms means visual appears 100ms before audio would normally occur."
         )
-        
+
         # Add explanatory label for correction factor
         correction_explanation = QLabel(
             "Positive: Visual comes earlier, Negative: Visual comes later"
@@ -215,6 +215,27 @@ class ExperimentConfigApp(QWidget):
 
         av_sync_layout.addRow('Correction (ms):', self.av_sync_correction)
         av_sync_layout.addRow(correction_explanation)
+
+        # Add predicted/fallback framerate field
+        self.predicted_framerate = QSpinBox()
+        self.predicted_framerate.setRange(30, 240)
+        self.predicted_framerate.setValue(60)
+        self.predicted_framerate.setSuffix(' Hz')
+        self.predicted_framerate.setToolTip(
+            "Enter your monitor's refresh rate as a fallback.\n"
+            "This is used if automatic framerate detection fails.\n"
+            "Common values: 60Hz (most monitors), 120Hz, 144Hz (gaming monitors)"
+        )
+
+        framerate_explanation = QLabel(
+            "Fallback if auto-detection fails. Check your display settings for actual value."
+        )
+        framerate_explanation.setWordWrap(True)
+        framerate_explanation.setStyleSheet("color: gray; font-size: 10px;")
+
+        av_sync_layout.addRow('Predicted Framerate:', self.predicted_framerate)
+        av_sync_layout.addRow(framerate_explanation)
+
         av_sync_group.setLayout(av_sync_layout)
         main_layout.addWidget(av_sync_group)
 
@@ -278,7 +299,8 @@ class ExperimentConfigApp(QWidget):
         self.api_url.textChanged.connect(self.mark_as_changed)
         self.api_token.textChanged.connect(self.mark_as_changed)
         self.av_sync_correction.valueChanged.connect(self.mark_as_changed)
-        
+        self.predicted_framerate.valueChanged.connect(self.mark_as_changed)
+
         # Block add/remove actions are connected separately in their respective methods
 
     def mark_as_changed(self):
@@ -366,6 +388,9 @@ class ExperimentConfigApp(QWidget):
     
         # Set audiovisual synchrony correction value
         self.av_sync_correction.setValue(config.get('av_sync_correction', 0.0))
+
+        # Set predicted framerate fallback value
+        self.predicted_framerate.setValue(config.get('predicted_framerate', 60))
     
         # Clear existing blocks
         for block in self.blocks:
@@ -430,6 +455,7 @@ class ExperimentConfigApp(QWidget):
             'api_url': self.api_url.text(),
             'api_token': self.api_token.text(),
             'av_sync_correction': self.av_sync_correction.value(),  # Added missing field
+            'predicted_framerate': self.predicted_framerate.value(),  # Fallback framerate
             'blocks': [block.get_config() for block in self.blocks],
             'total_estimated_time': float(self.total_time_label.text().split(': ')[1].split(' ')[0])
         }
