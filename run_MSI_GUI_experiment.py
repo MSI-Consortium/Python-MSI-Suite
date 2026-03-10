@@ -16,8 +16,13 @@ from psychopy import visual, core, event, monitors, sound
 from psychopy import prefs
 
 # Configure audio settings before importing sound - using only PTB for reliability
-prefs.hardware['audioLib'] = ['PTB']  # Using only PTB (PsychToolbox) as it's most reliable
-prefs.general['audioDevice'] = 'default'  # Use system default audio device
+
+# Configure audio settings before importing sound
+prefs.hardware['audioLib'] = ['PTB']
+prefs.hardware['audioLatencyMode'] = 3
+# NEED TO SPECIFY YOUR HARDWARE NAME HERE
+prefs.hardware['audioDevice'] = 'Headphones (Realtek(R) Audio)'
+
 
 def get_audio_lib_name():
     """Get audio library name, handling different PsychoPy versions."""

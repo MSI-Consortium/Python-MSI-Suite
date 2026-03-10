@@ -35,7 +35,9 @@ from psychopy import prefs
 
 # Configure audio settings before importing sound
 prefs.hardware['audioLib'] = ['PTB']
-prefs.general['audioDevice'] = 'default'
+prefs.hardware['audioLatencyMode'] = 3
+# NEED TO SPECIFY YOUR HARDWARE NAME HERE
+prefs.hardware['audioDevice'] = 'Headphones (Realtek(R) Audio)'
 
 # Initialize sound system (not available in all PsychoPy versions)
 try:
