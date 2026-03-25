@@ -415,40 +415,37 @@ def main():
                 win.flip()
 
         elif total_av_sync > 0:
-            # Visual first (positive): show visual, wait, then play audio
-            # Calculate total delay for audio: visual frames + wait frames
+            # Visual first (positive): SOA measured from visual ONSET to audio ONSET
             wait_frames = calculate_soa_frames(total_av_sync, frame_dur)
-            total_audio_delay = (VISUAL_FRAMES + wait_frames) * frame_dur
+            total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
             fixation.draw()
             visual_stim.draw()
             win.callOnFlip(trial_clock.reset)
 
-            # Try to preschedule audio at the calculated future time
+            # Try PTB prescheduling: audio at SOA from visual onset
             prescheduled = False
-            if total_audio_delay > 0.01:  # Only preschedule if delay > 10ms
-                prescheduled = schedule_sound_at_flip(win, sound_stim, delay_seconds=total_audio_delay)
+            audio_delay = wait_frames * frame_dur
+            if audio_delay > 0.01:
+                prescheduled = schedule_sound_at_flip(win, sound_stim, delay_seconds=audio_delay)
+
+            # If SOA rounds to 0 frames, play simultaneously on this flip
+            if not prescheduled and wait_frames == 0:
+                win.callOnFlip(sound_stim.play)
+                prescheduled = True
+
             win.flip()
 
-            # Continue visual presentation
-            for frame in range(VISUAL_FRAMES - 1):
+            # Remaining frames: visual for VISUAL_FRAMES, audio at wait_frames
+            for frame in range(1, total_frames):
                 fixation.draw()
-                visual_stim.draw()
-                win.flip()
+                if frame < VISUAL_FRAMES:
+                    visual_stim.draw()
 
-            # Wait for audio onset using frame-based timing
-            for frame in range(wait_frames):
-                fixation.draw()
-                win.flip()
+                # Play audio at SOA frame if not prescheduled
+                if not prescheduled and frame == wait_frames:
+                    win.callOnFlip(sound_stim.play)
 
-            # If prescheduling wasn't used, play audio now
-            if not prescheduled:
-                win.callOnFlip(sound_stim.play)
-                win.flip()
-
-            # Wait for audio to finish playing (same duration as visual stimulus)
-            for frame in range(VISUAL_FRAMES):
-                fixation.draw()
                 win.flip()
 
         else:
