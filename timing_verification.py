@@ -458,21 +458,15 @@ def main():
                 win.callOnFlip(sound_stim.play)
             win.flip()
 
-            # Wait for visual onset using frame-based timing
+            # SOA measured from audio ONSET to visual ONSET
             wait_frames = calculate_soa_frames(abs(total_av_sync), frame_dur)
-            for frame in range(wait_frames):
-                fixation.draw()
-                win.flip()
+            total_frames = wait_frames + VISUAL_FRAMES
 
-            # Show visual
-            fixation.draw()
-            visual_stim.draw()
-            win.flip()
-
-            # Continue visual presentation
-            for frame in range(VISUAL_FRAMES - 1):
+            # Remaining frames: visual starts at wait_frames
+            for frame in range(1, total_frames):
                 fixation.draw()
-                visual_stim.draw()
+                if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                    visual_stim.draw()
                 win.flip()
 
         # Clear screen - show outline dots again

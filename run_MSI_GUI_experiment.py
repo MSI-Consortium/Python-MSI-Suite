@@ -683,7 +683,10 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                 present_stimulus_with_hybrid_timing(visual_stim, remaining_duration, additional_stims, trial_clock)
                 
         elif av_sync < 0:  # Audio first (negative correction)
-            # Play audio first with PTB prescheduling for precise onset
+            # SOA measured from audio ONSET to visual ONSET
+            wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+            total_frames = wait_frames + VISUAL_FRAMES
+
             fixation.draw()
             for stim in additional_stims:
                 if stim:
@@ -699,17 +702,15 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
             # Capture stim_onset at AUDIO onset (first stimulus) for proper RT measurement
             stim_onset = trial_clock.getTime()
 
-            # Wait for corrected SOA using frame-based timing (more precise)
-            wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
-            for frame in range(wait_frames):
+            # Remaining frames: visual starts at wait_frames
+            for frame in range(1, total_frames):
                 fixation.draw()
+                if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES and visual_stim:
+                    visual_stim.draw()
                 for stim in additional_stims:
                     if stim:
                         stim.draw()
                 win.flip()
-
-            # Present visual for full duration
-            present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
                 
         else:  # Visual first (positive correction)
             # SOA measured from visual ONSET to audio ONSET
@@ -917,19 +918,25 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
             trial_clock=trial_clock
         )
     elif adjusted_soa < 0:
-        # Audio first
+        # Audio first: SOA measured from audio ONSET to visual ONSET
+        wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+        total_frames = wait_frames + VISUAL_FRAMES
+
         fixation.draw()
         for stim in additional_stims:
             stim.draw()
         win.callOnFlip(trial_clock.reset)
         win.callOnFlip(sound_stim.play)
         win.flip()
-        
-                        # Wait for adjusted SOA using precise timing
-        wait_precise_duration(abs(adjusted_soa), trial_clock)
-        
-        # Present visual stimulus using time-based method
-        present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
+
+        # Remaining frames: visual starts at wait_frames
+        for frame in range(1, total_frames):
+            fixation.draw()
+            if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.flip()
     else:
         # Visual first: SOA measured from visual ONSET to audio ONSET
         wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
@@ -1123,7 +1130,10 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                     for stim in additional_stims:
                         stim.draw()
                     win.flip()
-            elif av_sync < 0:  # Audio first
+            elif av_sync < 0:  # Audio first: SOA from audio ONSET to visual ONSET
+                wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+                total_frames = wait_frames + VISUAL_FRAMES
+
                 fixation.draw()
                 for stim in additional_stims:
                     stim.draw()
@@ -1135,27 +1145,12 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 # Capture stim_onset at AUDIO onset (first stimulus) for proper RT measurement
                 stim_onset = trial_clock.getTime()
 
-                # Wait for SOA using frame-based timing
-                wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
-                for frame in range(wait_frames):
+                # Remaining frames: visual starts at wait_frames
+                for frame in range(1, total_frames):
                     fixation.draw()
-                    for stim in additional_stims:
-                        stim.draw()
-                    win.flip()
-
-                # Present bilateral visual
-                fixation.draw()
-                visual_stim_left.draw()
-                visual_stim_right.draw()
-                for stim in additional_stims:
-                    stim.draw()
-                win.flip()
-
-                # Continue visual presentation for remaining frames
-                for frame in range(VISUAL_FRAMES - 1):
-                    fixation.draw()
-                    visual_stim_left.draw()
-                    visual_stim_right.draw()
+                    if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                        visual_stim_left.draw()
+                        visual_stim_right.draw()
                     for stim in additional_stims:
                         stim.draw()
                     win.flip()
@@ -1424,7 +1419,12 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
 
             # Show fixation for consistent duration using time-based method
             wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
-        else:  # Sequential bilateral audio
+        else:  # Sequential bilateral audio: SOA from first sound ONSET to second sound ONSET
+            soa_frames = calculate_soa_frames(abs(soa), frame_dur)
+            if soa_frames == 0:
+                soa_frames = 1  # Minimum 1 frame for sequential
+            total_frames = soa_frames + VISUAL_FRAMES  # extra frames for second sound to play
+
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
@@ -1435,19 +1435,17 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 win.callOnFlip(first_sound.play)
             win.flip()
 
-            # Wait for SOA using precise timing
-            wait_precise_duration(abs(soa), trial_clock)
+            # Remaining frames: second sound plays at soa_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
 
-            # Play second sound with prescheduling
-            fixation.draw()
-            for stim in additional_stims:
-                stim.draw()
-            if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
-                win.callOnFlip(second_sound.play)
-            win.flip()
+                if frame == soa_frames:
+                    if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
+                        win.callOnFlip(second_sound.play)
 
-            # Show fixation for consistent duration using time-based method
-            wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
+                win.flip()
     
     elif trial_type == 'audiovisual':
         # Stop any playing sounds
@@ -1482,7 +1480,10 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             # Use time-based presentation for remaining frames
             present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
 
-        elif adjusted_soa < 0:  # Audio first
+        elif adjusted_soa < 0:  # Audio first: SOA from audio ONSET to visual ONSET
+            wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+            total_frames = wait_frames + VISUAL_FRAMES
+
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
@@ -1493,11 +1494,14 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 win.callOnFlip(sound_stim.play)
             win.flip()
 
-            # Wait for SOA using precise timing
-            wait_precise_duration(abs(adjusted_soa), trial_clock)
-
-            # Show visual for full duration using time-based method
-            present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
+            # Remaining frames: visual starts at wait_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                    visual_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip()
 
         else:  # Visual first: SOA from visual ONSET to audio ONSET
             wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
