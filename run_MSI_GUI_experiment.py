@@ -24,6 +24,8 @@ prefs.hardware['audioLatencyMode'] = 3
 prefs.hardware['audioDevice'] = 'Headphones (Realtek(R) Audio)'
 
 
+
+
 def get_audio_lib_name():
     """Get audio library name, handling different PsychoPy versions."""
     try:
@@ -33,7 +35,7 @@ def get_audio_lib_name():
 
 print("\nAudio Configuration:")
 print(f"Selected Audio Library: {get_audio_lib_name()}")
-print(f"Audio Device: {prefs.general['audioDevice']}")
+print(f"Audio Device: {prefs.hardware['audioDevice']}")
 
 # Initialize sound system (not available in all PsychoPy versions)
 try:
