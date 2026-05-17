@@ -248,8 +248,12 @@ def main():
     frame_dur = 1.0 / actual_fps
     VISUAL_FRAMES = max(1, int(VISUAL_STIM_DURATION * actual_fps))
 
+    # Display pipeline lag correction (1 frame)
+    DISPLAY_LAG_FRAMES = 1
+
     print(f"Frame duration: {frame_dur * 1000:.2f} ms")
     print(f"Frames per stimulus: {VISUAL_FRAMES}")
+    print(f"Display lag correction: {DISPLAY_LAG_FRAMES} frame(s)")
     print("=" * 60)
 
     # Create stimuli
@@ -417,6 +421,8 @@ def main():
         elif total_av_sync > 0:
             # Visual first (positive): SOA measured from visual ONSET to audio ONSET
             wait_frames = calculate_soa_frames(total_av_sync, frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = wait_frames + DISPLAY_LAG_FRAMES
             total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
             fixation.draw()
@@ -460,6 +466,8 @@ def main():
 
             # SOA measured from audio ONSET to visual ONSET
             wait_frames = calculate_soa_frames(abs(total_av_sync), frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
             total_frames = wait_frames + VISUAL_FRAMES
 
             # Remaining frames: visual starts at wait_frames

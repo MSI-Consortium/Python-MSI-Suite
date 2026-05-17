@@ -239,6 +239,78 @@ class ExperimentConfigApp(QWidget):
         av_sync_group.setLayout(av_sync_layout)
         main_layout.addWidget(av_sync_group)
 
+        # Testing Parameters (for quick timing verification runs)
+        testing_group = QGroupBox('Testing Parameters')
+        testing_layout = QFormLayout()
+
+        testing_explanation = QLabel(
+            "Use these to speed up timing verification runs. "
+            "Reduce ITI and max response time to run through all conditions quickly."
+        )
+        testing_explanation.setWordWrap(True)
+        testing_explanation.setStyleSheet("color: gray; font-size: 10px;")
+        testing_layout.addRow(testing_explanation)
+
+        self.iti_min = QDoubleSpinBox()
+        self.iti_min.setRange(0.1, 10.0)
+        self.iti_min.setValue(1.0)
+        self.iti_min.setSingleStep(0.1)
+        self.iti_min.setDecimals(1)
+        self.iti_min.setSuffix(' s')
+        self.iti_min.setToolTip("Minimum inter-trial interval (foreperiod) for SJ tasks")
+        testing_layout.addRow('ITI Min (SJ):', self.iti_min)
+
+        self.iti_max = QDoubleSpinBox()
+        self.iti_max.setRange(0.1, 10.0)
+        self.iti_max.setValue(2.0)
+        self.iti_max.setSingleStep(0.1)
+        self.iti_max.setDecimals(1)
+        self.iti_max.setSuffix(' s')
+        self.iti_max.setToolTip("Maximum inter-trial interval (foreperiod) for SJ tasks")
+        testing_layout.addRow('ITI Max (SJ):', self.iti_max)
+
+        self.srt_iti_min = QDoubleSpinBox()
+        self.srt_iti_min.setRange(0.1, 10.0)
+        self.srt_iti_min.setValue(1.0)
+        self.srt_iti_min.setSingleStep(0.1)
+        self.srt_iti_min.setDecimals(1)
+        self.srt_iti_min.setSuffix(' s')
+        self.srt_iti_min.setToolTip("Minimum inter-trial interval (foreperiod) for SRT tasks")
+        testing_layout.addRow('ITI Min (SRT):', self.srt_iti_min)
+
+        self.srt_iti_max = QDoubleSpinBox()
+        self.srt_iti_max.setRange(0.1, 10.0)
+        self.srt_iti_max.setValue(3.0)
+        self.srt_iti_max.setSingleStep(0.1)
+        self.srt_iti_max.setDecimals(1)
+        self.srt_iti_max.setSuffix(' s')
+        self.srt_iti_max.setToolTip("Maximum inter-trial interval (foreperiod) for SRT tasks")
+        testing_layout.addRow('ITI Max (SRT):', self.srt_iti_max)
+
+        self.max_response_time = QDoubleSpinBox()
+        self.max_response_time.setRange(0.0, 30.0)
+        self.max_response_time.setValue(0.0)
+        self.max_response_time.setSingleStep(0.5)
+        self.max_response_time.setDecimals(1)
+        self.max_response_time.setSuffix(' s')
+        self.max_response_time.setToolTip(
+            "Maximum time to wait for a response in SJ tasks.\n"
+            "Set to 0 for unlimited (default behavior)."
+        )
+        testing_layout.addRow('Max Response Time (SJ):', self.max_response_time)
+
+        self.srt_response_window = QDoubleSpinBox()
+        self.srt_response_window.setRange(0.5, 10.0)
+        self.srt_response_window.setValue(2.0)
+        self.srt_response_window.setSingleStep(0.5)
+        self.srt_response_window.setDecimals(1)
+        self.srt_response_window.setSuffix(' s')
+        self.srt_response_window.setToolTip("Maximum time to wait for a response in SRT tasks")
+        testing_layout.addRow('Response Window (SRT):', self.srt_response_window)
+
+        testing_group.setLayout(testing_layout)
+        main_layout.addWidget(testing_group)
+
         # Blocks area
         self.blocks_scroll = QScrollArea()
         self.blocks_scroll.setWidgetResizable(True)
@@ -300,6 +372,12 @@ class ExperimentConfigApp(QWidget):
         self.api_token.textChanged.connect(self.mark_as_changed)
         self.av_sync_correction.valueChanged.connect(self.mark_as_changed)
         self.predicted_framerate.valueChanged.connect(self.mark_as_changed)
+        self.iti_min.valueChanged.connect(self.mark_as_changed)
+        self.iti_max.valueChanged.connect(self.mark_as_changed)
+        self.srt_iti_min.valueChanged.connect(self.mark_as_changed)
+        self.srt_iti_max.valueChanged.connect(self.mark_as_changed)
+        self.max_response_time.valueChanged.connect(self.mark_as_changed)
+        self.srt_response_window.valueChanged.connect(self.mark_as_changed)
 
         # Block add/remove actions are connected separately in their respective methods
 
@@ -391,7 +469,15 @@ class ExperimentConfigApp(QWidget):
 
         # Set predicted framerate fallback value
         self.predicted_framerate.setValue(config.get('predicted_framerate', 60))
-    
+
+        # Set testing parameters
+        self.iti_min.setValue(config.get('iti_min', 1.0))
+        self.iti_max.setValue(config.get('iti_max', 2.0))
+        self.srt_iti_min.setValue(config.get('srt_iti_min', 1.0))
+        self.srt_iti_max.setValue(config.get('srt_iti_max', 3.0))
+        self.max_response_time.setValue(config.get('max_response_time', 0.0) or 0.0)
+        self.srt_response_window.setValue(config.get('srt_response_window', 2.0))
+
         # Clear existing blocks
         for block in self.blocks:
             block.setParent(None)
@@ -456,6 +542,12 @@ class ExperimentConfigApp(QWidget):
             'api_token': self.api_token.text(),
             'av_sync_correction': self.av_sync_correction.value(),  # Added missing field
             'predicted_framerate': self.predicted_framerate.value(),  # Fallback framerate
+            'iti_min': self.iti_min.value(),
+            'iti_max': self.iti_max.value(),
+            'srt_iti_min': self.srt_iti_min.value(),
+            'srt_iti_max': self.srt_iti_max.value(),
+            'max_response_time': self.max_response_time.value() if self.max_response_time.value() > 0 else None,
+            'srt_response_window': self.srt_response_window.value(),
             'blocks': [block.get_config() for block in self.blocks],
             'total_estimated_time': float(self.total_time_label.text().split(': ')[1].split(' ')[0])
         }

@@ -33,7 +33,7 @@ def get_audio_lib_name():
 
 print("\nAudio Configuration:")
 print(f"Selected Audio Library: {get_audio_lib_name()}")
-print(f"Audio Device: {prefs.general['audioDevice']}")
+print(f"Audio Device: {prefs.hardware['audioDevice']}")
 
 # Initialize sound system (not available in all PsychoPy versions)
 try:
@@ -258,6 +258,9 @@ def load_api_credentials(filename="api_text.txt"):
 api_url, api_token = load_api_credentials()
 
 # Initialize REDCap project if credentials are available and not in offline mode
+if len(sys.argv) < 2:
+    print("Please provide a configuration file.")
+    sys.exit(1)
 config = load_config(sys.argv[1])
 offline_mode = config.get('offline_mode', False)
 
@@ -359,12 +362,7 @@ def save_demographic_data(config):
 
     return demo_filename
 
-# Replace existing config loading code with:
-if len(sys.argv) < 2:
-    print("Please provide a configuration file.")
-    sys.exit(1)
-
-config = load_config(sys.argv[1])
+# Config already loaded above (before REDCap init)
 demographic_file = save_demographic_data(config)
 print(f"Demographic data saved to: {demographic_file}")
 
@@ -685,6 +683,8 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
         elif av_sync < 0:  # Audio first (negative correction)
             # SOA measured from audio ONSET to visual ONSET
             wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
             total_frames = wait_frames + VISUAL_FRAMES
 
             fixation.draw()
@@ -711,10 +711,12 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
                     if stim:
                         stim.draw()
                 win.flip()
-                
+
         else:  # Visual first (positive correction)
             # SOA measured from visual ONSET to audio ONSET
             wait_frames = calculate_soa_frames(av_sync, frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = wait_frames + DISPLAY_LAG_FRAMES
             total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
             fixation.draw()
@@ -773,6 +775,19 @@ print(f"Using refresh rate: {actual_fps}Hz")
 VISUAL_FRAMES = max(1, int(VISUAL_STIM_DURATION * actual_fps))
 print(f"Frames per stimulus: {VISUAL_FRAMES}")
 print(f"Note: Timing will use hybrid frame+time-based methods for reliability")
+
+# Display pipeline lag correction: visual stimulus physically appears 1 frame after
+# the flip due to display processing latency. This constant compensates by presenting
+# visual 1 frame earlier (or delaying audio by 1 frame) in frame-based SOA timing.
+DISPLAY_LAG_FRAMES = 1
+
+# Configurable timing parameters (can be overridden in config JSON)
+MAX_RESPONSE_TIME = config.get('max_response_time', None)  # None = wait indefinitely (SJ default)
+SRT_RESPONSE_WINDOW = config.get('srt_response_window', 2.0)  # seconds
+ITI_MIN = config.get('iti_min', 1.0)  # seconds
+ITI_MAX = config.get('iti_max', 2.0)  # seconds
+SRT_ITI_MIN = config.get('srt_iti_min', 1.0)  # seconds
+SRT_ITI_MAX = config.get('srt_iti_max', 3.0)  # seconds
 
 # Create common stimuli
 fixation = visual.ShapeStim(win, 
@@ -900,10 +915,10 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     for stim in additional_stims:
         stim.draw()
     win.flip()
-    core.wait(random.uniform(1, 2))  # Random foreperiod
-    
+    core.wait(random.uniform(ITI_MIN, ITI_MAX))  # Random foreperiod
+
     trial_clock = core.Clock()
-    
+
     # Use time-based stimulus presentation with SOA timing
     visual_duration_ms = VISUAL_STIM_DURATION * 1000
     
@@ -920,6 +935,8 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     elif adjusted_soa < 0:
         # Audio first: SOA measured from audio ONSET to visual ONSET
         wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+        # Compensate for display pipeline lag: visual appears 1 frame after flip
+        wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
         total_frames = wait_frames + VISUAL_FRAMES
 
         fixation.draw()
@@ -940,6 +957,8 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     else:
         # Visual first: SOA measured from visual ONSET to audio ONSET
         wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
+        # Compensate for display pipeline lag: visual appears 1 frame after flip
+        wait_frames = wait_frames + DISPLAY_LAG_FRAMES
         total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
         fixation.draw()
@@ -967,13 +986,16 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
 
             win.flip()
     
-    # Modified response collection - wait indefinitely until response
+    # Response collection - wait until response or timeout
     while not response_made:
+        if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
+            print("Response timeout")
+            break
         fixation.draw()
         for stim in additional_stims:
             stim.draw()
         win.flip()
-        
+
         keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
         if keys:
             if 'escape' in keys[0][0]:
@@ -983,7 +1005,7 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
                 response = 1 if keys[0][0] == '1' else 2
                 response_made = True
                 print(f"Response: {response} at {rt}s")
-    
+
     sound_stim.stop()
     return response, rt
 
@@ -1011,7 +1033,7 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     for stim in additional_stims:
         stim.draw()
     win.flip()
-    foreperiod = random.uniform(1, 3)
+    foreperiod = random.uniform(SRT_ITI_MIN, SRT_ITI_MAX)
     print(f"Waiting foreperiod: {foreperiod}s")
     core.wait(foreperiod)
     
@@ -1028,7 +1050,7 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     )
     
     # Response collection
-    response_window = 2.0  # Allow 2 seconds for response
+    response_window = SRT_RESPONSE_WINDOW
     while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
         fixation.draw()
         for stim in additional_stims:
@@ -1077,10 +1099,10 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     for stim in additional_stims:
         stim.draw()
     win.flip()
-    core.wait(random.uniform(1, 3))
-    
+    core.wait(random.uniform(SRT_ITI_MIN, SRT_ITI_MAX))
+
     trial_clock = core.Clock()
-    
+
     # Helper functions to determine stimuli
     def get_visual_stim():
         if '_left' in trial_type:
@@ -1132,6 +1154,8 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                     win.flip()
             elif av_sync < 0:  # Audio first: SOA from audio ONSET to visual ONSET
                 wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
+                # Compensate for display pipeline lag
+                wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
                 total_frames = wait_frames + VISUAL_FRAMES
 
                 fixation.draw()
@@ -1156,6 +1180,8 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                     win.flip()
             else:  # Visual first: SOA from visual ONSET to audio ONSET
                 wait_frames = calculate_soa_frames(av_sync, frame_dur)
+                # Compensate for display pipeline lag
+                wait_frames = wait_frames + DISPLAY_LAG_FRAMES
                 total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
                 fixation.draw()
@@ -1261,7 +1287,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
             )
     
     # Response collection
-    response_window = 2.0
+    response_window = SRT_RESPONSE_WINDOW
     while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
         fixation.draw()
         for stim in additional_stims:
@@ -1339,8 +1365,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     for stim in additional_stims:
         stim.draw()
     win.flip()
-    core.wait(random.uniform(1, 2))
-    
+    core.wait(random.uniform(ITI_MIN, ITI_MAX))
+
     trial_clock = core.Clock()
     visual_duration = VISUAL_FRAMES * frame_dur  # Ensure consistent duration
     
@@ -1482,6 +1508,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
 
         elif adjusted_soa < 0:  # Audio first: SOA from audio ONSET to visual ONSET
             wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
             total_frames = wait_frames + VISUAL_FRAMES
 
             fixation.draw()
@@ -1505,6 +1533,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
 
         else:  # Visual first: SOA from visual ONSET to audio ONSET
             wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = wait_frames + DISPLAY_LAG_FRAMES
             total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
 
             fixation.draw()
@@ -1542,11 +1572,14 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     
     # Wait for response with clean frame rendering
     while not response_made:
+        if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
+            print("Response timeout")
+            break
         fixation.draw()
         for stim in additional_stims:
             stim.draw()
         win.flip(clearBuffer=True)
-        
+
         keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
         if keys:
             if 'escape' in keys[0][0]:
@@ -1556,7 +1589,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 response = 1 if keys[0][0] == '1' else 2
                 response_made = True
                 print(f"Response: {response} at {rt}s")
-    
+
     # Stop all sounds
     sound_left.stop()
     sound_right.stop()
