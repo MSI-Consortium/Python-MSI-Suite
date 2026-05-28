@@ -12,16 +12,16 @@ import csv
 import json
 import sys
 from datetime import datetime
-from psychopy import visual, core, event, monitors, sound
+from psychopy import visual, core, event, monitors
 from psychopy import prefs
 
-# Configure audio settings before importing sound - using only PTB for reliability
-
-# Configure audio settings before importing sound
+# Configure audio settings BEFORE importing sound module
 prefs.hardware['audioLib'] = ['PTB']
 prefs.hardware['audioLatencyMode'] = 3
 # NEED TO SPECIFY YOUR HARDWARE NAME HERE
 prefs.hardware['audioDevice'] = 'Headphones (Realtek(R) Audio)'
+
+from psychopy import sound
 
 
 
@@ -339,14 +339,14 @@ def save_demographic_data(config):
             }
             
             # Import just the record_id
-            response = project.import_records([data])
+            project.import_records([data])
             print(f"Created/Updated record for participant: {config['participant_id']}")
-            
+
             # Now upload the CSV file as an attachment
             try:
                 with open(demo_filename, 'rb') as file:
                     file_content = file.read()
-                    response = project.import_file(
+                    project.import_file(
                         record=config['participant_id'],
                         field='demographic_data_file',
                         file_name=demo_filename,
@@ -799,57 +799,6 @@ fixation = visual.ShapeStim(win,
     lineColor="black"
 )
 
-# Move to top, after imports
-def verify_visual_timing(win, target_dur):
-    """Returns True if the last visual timing was acceptable"""
-    return abs(win.lastFrameT - target_dur) < 0.001  # 1ms tolerance
-
-def create_sound(filename, duration):
-    """Create and configure a sound stimulus with improved error handling"""
-    try:
-        filepath = os.path.join(os.path.dirname(__file__), filename)
-        print(f"\nAttempting to create sound: {filepath}")
-        print(f"Using audio library: {get_audio_lib_name()}")
-        
-        # Create sound with PTB backend
-        try:
-            sound_stim = sound.Sound(filepath, secs=duration)
-            sound_stim.setVolume(0.8)  # Set to 80% volume for safety
-            
-            # Test the sound
-            print("Testing sound playback...")
-            sound_stim.play()
-            core.wait(0.1)  # Wait briefly
-            sound_stim.stop()
-            print("Sound test complete")
-            
-            return sound_stim
-        except Exception as e:
-            print(f"Error creating sound: {e}")
-            print("Sound system details:")
-            print(f"Audio library: {get_audio_lib_name()}")
-            if os.path.exists(filepath):
-                print(f"Sound file exists at {filepath}")
-            else:
-                print(f"Sound file not found at {filepath}")
-                print("Attempting to create sound files using sound_creator.py")
-                subprocess.call(["python", "sound_creator.py"])
-                if os.path.exists(filepath):
-                    try:
-                        sound_stim = sound.Sound(filepath, secs=duration)
-                        sound_stim.setVolume(0.8)
-                        return sound_stim
-                    except Exception as new_e:
-                        print(f"Failed to create sound even after regenerating file: {new_e}")
-        
-        # If we get here, nothing worked
-        print("Unable to initialize sound system. Please check your audio settings and device.")
-        return None
-        
-    except Exception as e:
-        print(f"Error in create_sound: {e}")
-        return None
-
 def cleanup():
     """Clean up resources properly"""
     try:
@@ -873,6 +822,38 @@ def show_instructions(text):
             win.close()
             core.quit()
         core.wait(0.001)
+
+def calculate_soa_frames(soa_ms, frame_dur):
+    """Convert SOA in milliseconds to number of frames with consistent rounding."""
+    return max(0, round(abs(soa_ms/1000.0) / frame_dur))
+
+
+def get_adjusted_rt(raw_rt, trial_type, av_sync_ms):
+    """Adjust RT to account for hardware latency differences between modalities."""
+    if raw_rt is None:
+        return None
+
+    av_sync_sec = av_sync_ms / 1000.0
+
+    trial_lower = trial_type.lower()
+    has_visual = 'visual' in trial_lower
+    has_audio = 'audio' in trial_lower or 'auditory' in trial_lower
+
+    is_visual_only = has_visual and not has_audio
+    is_audio_only = has_audio and not has_visual
+    is_audiovisual = 'audiovisual' in trial_lower or (has_audio and has_visual)
+
+    if is_visual_only:
+        adjustment = max(0, av_sync_sec)
+    elif is_audio_only:
+        adjustment = max(0, -av_sync_sec)
+    elif is_audiovisual:
+        adjustment = abs(av_sync_sec)
+    else:
+        adjustment = 0
+
+    return raw_rt - adjustment
+
 
 def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     print(f"\nStarting SJ trial with SOA: {soa}ms")
@@ -920,17 +901,16 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     core.wait(random.uniform(ITI_MIN, ITI_MAX))  # Random foreperiod
 
     trial_clock = core.Clock()
+    stim_onset = 0
 
-    # Use time-based stimulus presentation with SOA timing
-    visual_duration_ms = VISUAL_STIM_DURATION * 1000
-    
     if adjusted_soa == 0:
-        # Simultaneous presentation
+        # Simultaneous presentation — stim_onset captures the delay from the
+        # two-flip pattern so we can subtract it from RT below.
         stim_onset = present_stimulus_with_robust_timing(
             stimulus_type='audiovisual',
             visual_stim=visual_stim,
             sound_stim=sound_stim,
-            av_sync=0,  # No additional correction since SOA already includes it
+            av_sync=0,
             additional_stims=additional_stims,
             trial_clock=trial_clock
         )
@@ -1003,7 +983,7 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
             if 'escape' in keys[0][0]:
                 cleanup()
             else:
-                rt = keys[0][1]
+                rt = keys[0][1] - stim_onset
                 response = 1 if keys[0][0] == '1' else 2
                 response_made = True
                 print(f"Response: {response} at {rt}s")
@@ -1104,6 +1084,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     core.wait(random.uniform(SRT_ITI_MIN, SRT_ITI_MAX))
 
     trial_clock = core.Clock()
+    stim_onset = 0
 
     # Helper functions to determine stimuli
     def get_visual_stim():
@@ -1370,8 +1351,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     core.wait(random.uniform(ITI_MIN, ITI_MAX))
 
     trial_clock = core.Clock()
-    visual_duration = VISUAL_FRAMES * frame_dur  # Ensure consistent duration
-    
+    stim_onset = 0
+
     # Handle different trial types
     if trial_type == 'visual':
         if side == 'left':
@@ -1486,17 +1467,14 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             visual_stim, sound_stim = visual_stim_right, sound_right
         
         if adjusted_soa == 0:  # Simultaneous audiovisual
-            # For simultaneous presentation, we separate the audio and visual
-            # timing to avoid issues that can shorten the visual duration
-
-            # First, reset clock but don't do anything else yet
+            # Two-flip pattern: first flip resets clock, second presents stimuli.
+            # Capture stim_onset so RT is measured from actual stimulus appearance.
             fixation.draw()
             for stim in additional_stims:
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.flip()
 
-            # Now start the visual and audio together with PTB prescheduling
             fixation.draw()
             visual_stim.draw()
             for stim in additional_stims:
@@ -1504,8 +1482,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
                 win.callOnFlip(sound_stim.play)
             win.flip()
+            stim_onset = trial_clock.getTime()
 
-            # Use time-based presentation for remaining frames
             present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
 
         elif adjusted_soa < 0:  # Audio first: SOA from audio ONSET to visual ONSET
@@ -1587,7 +1565,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             if 'escape' in keys[0][0]:
                 cleanup()
             else:
-                rt = keys[0][1]
+                rt = keys[0][1] - stim_onset
                 response = 1 if keys[0][0] == '1' else 2
                 response_made = True
                 print(f"Response: {response} at {rt}s")
@@ -1656,6 +1634,10 @@ def run_block(block_config, data_filename, config):
                       for soa in sj_mod_soas
                       for side in ['left', 'right']
                       for _ in range(trials_per_condition)]
+
+    else:
+        print(f"Unknown experiment type: {exp_type}")
+        return
 
     # Prepare trials
     random.shuffle(trial_types)
@@ -1733,6 +1715,66 @@ def run_block(block_config, data_filename, config):
     final_message.draw()
     win.flip()
     core.wait(3)
+
+def check_sound_files():
+    required_files = ["tone.wav", "high_pitch.wav", "low_pitch.wav"]
+    missing_files = []
+    for filename in required_files:
+        filepath = os.path.join(os.path.dirname(__file__), filename)
+        if not os.path.exists(filepath):
+            missing_files.append(filename)
+    if missing_files:
+        print(f"Missing sound files: {', '.join(missing_files)}")
+        print("Launching sound_creator.py to generate missing sound files.")
+        subprocess.call(["python", "sound_creator.py"])
+        for filename in missing_files:
+            filepath = os.path.join(os.path.dirname(__file__), filename)
+            if not os.path.exists(filepath):
+                print(f"Error: Sound file {filename} was not created.")
+                sys.exit(1)
+
+check_sound_files()
+
+
+def upload_csv_to_redcap(csv_filename):
+    """Upload CSV file to REDCap as a file attachment if project is available."""
+    if project:
+        try:
+            print(f"\nAttempting to upload {csv_filename} to REDCap...")
+            print(f"Using record_id: {config['participant_id']}")
+
+            record_data = [{'record_id': config['participant_id']}]
+
+            try:
+                project.import_records(record_data)
+                print(f"Created/updated record for ID: {config['participant_id']}")
+
+                with open(csv_filename, 'rb') as file_obj:
+                    file_content = file_obj.read()
+                    project.import_file(
+                        record=config['participant_id'],
+                        field='python_data_file',
+                        file_name=os.path.basename(csv_filename),
+                        file_content=file_content
+                    )
+
+                print(f"Successfully uploaded {csv_filename} to REDCap")
+                return True
+
+            except redcap.RedcapError as e:
+                print(f"REDCap API error: {str(e)}")
+                return False
+
+        except Exception as e:
+            print(f"Error during upload: {str(e)}")
+            print(f"Error type: {type(e)}")
+            import traceback
+            print(traceback.format_exc())
+            return False
+    else:
+        print("REDCap project not initialized. Skipping REDCap upload.")
+        return False
+
 
 def run_experiment_series(config):
     """Run the experiment series with improved logging and error handling."""
@@ -1814,316 +1856,8 @@ def run_experiment_series(config):
         win.close()
         core.quit()
 
-actual_fps = win.getActualFrameRate()
-if actual_fps is not None:
-    frame_dur = 1.0/actual_fps
-else:
-    frame_dur = 1.0/60.0  # Assume 60Hz if can't get actual rate
-print(f"Actual frame rate: {actual_fps}")
-
-# Function to verify if a flip occurred at the right time
-def verify_visual_timing(win, target_dur):
-    """Returns True if the last visual timing was acceptable"""
-    return abs(win.lastFrameT - target_dur) < 0.001  # 1ms tolerance
-
-def verify_timing_accuracy(expected_time, actual_time, tolerance=0.002):
-    """Verify timing accuracy and log any issues"""
-    diff = abs(actual_time - expected_time)
-    if diff > tolerance:
-        print(f"TIMING WARNING: Expected {expected_time}s, got {actual_time}s (diff: {diff}s)")
-    return diff <= tolerance
-
-def soa_to_frames(soa_ms, frame_duration):
-    """Convert SOA in milliseconds to number of frames"""
-    return round((soa_ms/1000.0) / frame_duration)
-
-# Modify sound creation to include error handling and cleanup
-def create_sound(filename, duration):
-    try:
-        sound_stim = sound.Sound(filename, secs=duration)
-        sound_stim.setVolume(1.0)
-        return sound_stim
-    except Exception as e:
-        print(f"Error loading sound file {filename}: {e}")
-        sys.exit(1)
-
-# Add proper cleanup
-def cleanup():
-    """Clean up resources properly"""
-    try:
-        # Stop any playing sounds
-        sound.stopAllSounds()
-        # Close the window
-        win.close()
-    finally:
-        # Quit PsychoPy
-        core.quit()
-
-# Modify visual stimulus presentation to respect frame timing
-def present_visual_stimulus(visual_stim, duration_frames, additional_stims=None):
-    """Present a visual stimulus for a specific number of frames
-    
-    Returns True if successfully presented for the full duration.
-    Implements robust frame timing to prevent dropped frames.
-    
-    Parameters:
-    -----------
-    visual_stim : visual.BaseVisualStim
-        The primary visual stimulus to draw
-    duration_frames : int
-        Number of frames to display the stimulus
-    additional_stims : list, optional
-        List of additional visual stimuli to draw along with the main stimulus
-    """
-    # Ensure we have at least one frame for visibility
-    duration_frames = max(1, duration_frames)
-    
-    # Create a clock to measure timing
-    frame_clock = core.Clock()
-    frame_times = []
-    
-    # Prepare PsychoPy for consistent timing
-    # Using drawStim method for more direct control
-    win.recordFrameIntervals = True
-    
-    # Start with the minimum elements - first frame
-    fixation.draw()
-    visual_stim.draw()
-    
-    # Draw any additional stimuli if provided
-    if additional_stims:
-        for stim in additional_stims:
-            if stim is not None:
-                stim.draw()
-                
-    # Reset the timer and flip
-    frame_clock.reset()
-    win.flip()
-    frame_times.append(frame_clock.getTime())
-    frames_shown = 1
-    
-    # Remaining frames with robust timing
-    for frame in range(duration_frames - 1):
-        # Critical priority: Draw visual stimulus first
-        fixation.draw()
-        visual_stim.draw()
-        
-        # Draw additional stimuli - always include them for visual timing consistency
-        if additional_stims:
-            for stim in additional_stims:
-                if stim is not None:
-                    stim.draw()
-        
-        # Force a proper frame update with waitBlanking=True to ensure precise timing
-        win.flip(clearBuffer=True)
-        curr_time = frame_clock.getTime()
-        frame_times.append(curr_time)
-        frames_shown += 1
-        
-        # Check if we're falling behind on timing and log it
-        if len(frame_times) >= 2:
-            last_interval = frame_times[-1] - frame_times[-2]
-            if last_interval > frame_dur * 1.5:
-                print(f"WARNING: Possible frame drop detected at frame {frame+1}/{duration_frames}")
-    
-    # Measure the actual duration
-    actual_duration = frame_clock.getTime()
-    expected_duration = duration_frames * frame_dur
-    
-    # Detailed timing analysis
-    frame_intervals = [frame_times[i] - frame_times[i-1] for i in range(1, len(frame_times))]
-    max_interval = max(frame_intervals) if frame_intervals else 0
-    dropped_frames = sum(1 for interval in frame_intervals if interval > frame_dur * 1.5)
-    
-    # Always log timing information for debugging
-    if dropped_frames > 0:
-        print(f"TIMING WARNING: Expected {expected_duration:.4f}s, got {actual_duration:.4f}s")
-        print(f"Frames requested: {duration_frames}, frames shown: {frames_shown}")
-        print(f"Dropped frames: {dropped_frames}")
-        print(f"Max interval: {max_interval:.4f}s (should be ~{frame_dur:.4f}s)")
-        print(f"Frame intervals: {[round(i*1000) for i in frame_intervals]}ms")
-    
-    # Turn off frame recording to avoid memory issues
-    win.recordFrameIntervals = False
-    
-    return dropped_frames == 0  # Return success only if no frames were dropped
-
-def ensure_visual_presentation(visual_stim, duration_frames, additional_stims=None, max_attempts=3):
-    """Ensures visual stimulus is presented properly, retrying if frames are dropped.
-    
-    This function is used when reliable visual presentation is critical.
-    
-    Parameters:
-    -----------
-    visual_stim : visual.BaseVisualStim
-        The primary visual stimulus to draw
-    duration_frames : int
-        Number of frames to display the stimulus
-    additional_stims : list, optional
-        List of additional visual stimuli to draw along with the main stimulus
-    max_attempts : int
-        Maximum number of retry attempts if frames are dropped
-        
-    Returns:
-    --------
-    bool : True if presentation was successful (no dropped frames)
-    """
-    success = False
-    attempts = 0
-    
-    while not success and attempts < max_attempts:
-        success = present_visual_stimulus(visual_stim, duration_frames, additional_stims)
-        attempts += 1
-        if not success and attempts < max_attempts:
-            print(f"Retrying visual presentation (attempt {attempts+1}/{max_attempts})...")
-            # Short delay to let system recover before next attempt
-            core.wait(0.05)
-    
-    if not success:
-        print("WARNING: Could not achieve clean visual presentation after multiple attempts")
-    
-    return success
-
-def upload_csv_to_redcap(csv_filename):
-    """Upload CSV file to REDCap as a file attachment if project is available."""
-    if project:
-        try:
-            print(f"\nAttempting to upload {csv_filename} to REDCap...")
-            print(f"Using record_id: {config['participant_id']}")
-            
-            # First create/ensure the record exists
-            record_data = [{
-                'record_id': config['participant_id']
-            }]
-            
-            try:
-                # First create or update the record with just the ID
-                project.import_records(record_data)
-                print(f"Created/updated record for ID: {config['participant_id']}")
-                
-                # Now upload the file as a separate operation
-                with open(csv_filename, 'rb') as file_obj:
-                    file_content = file_obj.read()
-                    response = project.import_file(
-                        record=config['participant_id'],
-                        field='python_data_file',
-                        file_name=os.path.basename(csv_filename),
-                        file_content=file_content
-                    )
-                
-                print(f"Successfully uploaded {csv_filename} to REDCap")
-                return True
-                
-            except redcap.RedcapError as e:
-                print(f"REDCap API error: {str(e)}")
-                return False
-                
-        except Exception as e:
-            print(f"Error during upload: {str(e)}")
-            print(f"Error type: {type(e)}")
-            import traceback
-            print(traceback.format_exc())
-            return False
-    else:
-        print("REDCap project not initialized. Skipping REDCap upload.")
-        return False
-
-# Use in run_experiment_series:
 if __name__ == "__main__":
-    try:
-        run_experiment_series(config)
-    except Exception as e:
-        print(f"Error during experiment: {e}")
-        cleanup()
-
-# Check for required sound files at the start
-def check_sound_files():
-    required_files = ["tone.wav", "high_pitch.wav", "low_pitch.wav"]
-    missing_files = []
-    for filename in required_files:
-        filepath = os.path.join(os.path.dirname(__file__), filename)
-        if not os.path.exists(filepath):
-            missing_files.append(filename)
-    if missing_files:
-        print(f"Missing sound files: {', '.join(missing_files)}")
-        print("Launching sound_creator.py to generate missing sound files.")
-        # Run sound_creator.py
-        subprocess.call(["python", "sound_creator.py"])
-        # After sound_creator.py exits, check again
-        for filename in missing_files:
-            filepath = os.path.join(os.path.dirname(__file__), filename)
-            if not os.path.exists(filepath):
-                print(f"Error: Sound file {filename} was not created.")
-                sys.exit(1)
-
-# Call the function before running the experiment
-check_sound_files()
-
-# Timing utility function for frame-based SOA calculation
-def calculate_soa_frames(soa_ms, frame_dur):
-    """Convert SOA in milliseconds to number of frames with consistent rounding.
-
-    Frame-based timing is preferred for AV sync corrections because:
-    - Visual stimuli can only appear at monitor refresh boundaries
-    - Quantizing to frames matches hardware reality
-    - More consistent than time-based waits which can overshoot
-    """
-    return max(0, round(abs(soa_ms/1000.0) / frame_dur))
-
-
-def get_adjusted_rt(raw_rt, trial_type, av_sync_ms):
-    """Adjust RT to account for hardware latency differences between modalities.
-
-    This normalizes all RTs to a common reference point, enabling valid
-    cross-modal comparisons (V vs A vs AV).
-
-    The adjustment removes the extra latency from whichever modality is slower:
-    - If av_sync > 0: visual is slower, subtract av_sync from V and AV trials
-    - If av_sync < 0: audio is slower, subtract |av_sync| from A and AV trials
-
-    After adjustment, all RTs represent "time from when the faster modality
-    would have reached the participant."
-
-    Args:
-        raw_rt: Raw reaction time in seconds (can be None for missed responses)
-        trial_type: Trial type string (e.g., 'visual', 'audio', 'audiovisual',
-                    'visual_left', 'audio_bilateral', etc.)
-        av_sync_ms: AV sync correction in milliseconds
-                    (positive = visual slower, negative = audio slower)
-
-    Returns:
-        Adjusted RT in seconds, or None if raw_rt is None
-    """
-    if raw_rt is None:
-        return None
-
-    av_sync_sec = av_sync_ms / 1000.0  # Convert to seconds
-
-    # Determine trial modality from trial_type string
-    # Note: SJ_Mod uses 'auditory' while SRT uses 'audio', so check for both
-    trial_lower = trial_type.lower()
-    has_visual = 'visual' in trial_lower
-    has_audio = 'audio' in trial_lower or 'auditory' in trial_lower
-
-    is_visual_only = has_visual and not has_audio
-    is_audio_only = has_audio and not has_visual
-    is_audiovisual = 'audiovisual' in trial_lower or (has_audio and has_visual)
-
-    if is_visual_only:
-        # Visual-only: adjust only if visual is slower (av_sync > 0)
-        adjustment = max(0, av_sync_sec)
-    elif is_audio_only:
-        # Audio-only: adjust only if audio is slower (av_sync < 0)
-        adjustment = max(0, -av_sync_sec)
-    elif is_audiovisual:
-        # Audiovisual: always measured from slower modality (first triggered)
-        adjustment = abs(av_sync_sec)
-    else:
-        # Unknown trial type, no adjustment
-        adjustment = 0
-
-    return raw_rt - adjustment
-
+    run_experiment_series(config)
 
 
 
