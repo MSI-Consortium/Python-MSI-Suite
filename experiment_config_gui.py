@@ -18,7 +18,7 @@ class BlockConfig(QGroupBox):
         layout = QFormLayout()
 
         self.exp_type = QComboBox()
-        self.exp_type.addItems(['SJ', 'SRT', 'SRT_Mod', 'SJ_Mod'])
+        self.exp_type.addItems(['SJ', 'SRT', 'TOJ', 'SRT_Mod', 'SJ_Mod', 'TOJ_Mod'])
         self.exp_type.currentTextChanged.connect(self.on_experiment_change)
         layout.addRow('Experiment Type:', self.exp_type)
 
@@ -58,6 +58,9 @@ class BlockConfig(QGroupBox):
         if exp_type == 'SJ':
             total_trials = trials_per_condition * 13  # 13 SOA conditions
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
+        elif exp_type == 'TOJ':
+            total_trials = trials_per_condition * 13  # 13 SOA conditions
+            estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
         elif exp_type == 'SRT':
             total_trials = trials_per_condition * 3  # 3 conditions
             estimated_time = total_trials * (1.5 + 0.05)  # 1-2s ITI (avg 1.5s) + 50ms stimulus
@@ -65,6 +68,9 @@ class BlockConfig(QGroupBox):
             total_trials = trials_per_condition * 9  # 9 trial types
             estimated_time = total_trials * (1.5 + 0.05)  # 1-2s ITI (avg 1.5s) + 50ms stimulus
         elif exp_type == 'SJ_Mod':
+            total_trials = trials_per_condition * 9 * 6  # 9 SOAs, 6 conditions
+            estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
+        elif exp_type == 'TOJ_Mod':
             total_trials = trials_per_condition * 9 * 6  # 9 SOAs, 6 conditions
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
 
@@ -257,8 +263,8 @@ class ExperimentConfigApp(QWidget):
         self.iti_min.setSingleStep(0.1)
         self.iti_min.setDecimals(1)
         self.iti_min.setSuffix(' s')
-        self.iti_min.setToolTip("Minimum inter-trial interval (foreperiod) for SJ tasks")
-        testing_layout.addRow('ITI Min (SJ):', self.iti_min)
+        self.iti_min.setToolTip("Minimum inter-trial interval (foreperiod) for SJ/TOJ tasks")
+        testing_layout.addRow('ITI Min (SJ/TOJ):', self.iti_min)
 
         self.iti_max = QDoubleSpinBox()
         self.iti_max.setRange(0.1, 10.0)
@@ -266,8 +272,8 @@ class ExperimentConfigApp(QWidget):
         self.iti_max.setSingleStep(0.1)
         self.iti_max.setDecimals(1)
         self.iti_max.setSuffix(' s')
-        self.iti_max.setToolTip("Maximum inter-trial interval (foreperiod) for SJ tasks")
-        testing_layout.addRow('ITI Max (SJ):', self.iti_max)
+        self.iti_max.setToolTip("Maximum inter-trial interval (foreperiod) for SJ/TOJ tasks")
+        testing_layout.addRow('ITI Max (SJ/TOJ):', self.iti_max)
 
         self.srt_iti_min = QDoubleSpinBox()
         self.srt_iti_min.setRange(0.1, 10.0)
@@ -294,10 +300,10 @@ class ExperimentConfigApp(QWidget):
         self.max_response_time.setDecimals(1)
         self.max_response_time.setSuffix(' s')
         self.max_response_time.setToolTip(
-            "Maximum time to wait for a response in SJ tasks.\n"
+            "Maximum time to wait for a response in SJ/TOJ tasks.\n"
             "Set to 0 for unlimited (default behavior)."
         )
-        testing_layout.addRow('Max Response Time (SJ):', self.max_response_time)
+        testing_layout.addRow('Max Response Time (SJ/TOJ):', self.max_response_time)
 
         self.srt_response_window = QDoubleSpinBox()
         self.srt_response_window.setRange(0.5, 10.0)

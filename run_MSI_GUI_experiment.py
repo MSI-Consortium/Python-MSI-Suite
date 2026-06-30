@@ -991,6 +991,142 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     sound_stim.stop()
     return response, rt
 
+def run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
+    print(f"\nStarting toj trial with SOA: {soa}ms")
+    av_sync = config.get('av_sync_correction', 0.0)
+    adjusted_soa = soa + av_sync
+    print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
+
+    # Create SOA display text for test mode
+    test_mode = config.get('test_mode', False)
+    soa_text = None
+    if test_mode:
+        # Basic SOA display
+        if adjusted_soa < 0:
+            soa_display = f"A{abs(adjusted_soa)}V"
+        elif adjusted_soa > 0:
+            soa_display = f"V{adjusted_soa}A"
+        else:
+            soa_display = "SYNC"
+
+        # Create visualization of how correction affects timing
+        timing_indicator = ""
+        if av_sync > 0:
+            timing_indicator = f"← Visual shifted earlier by {av_sync}ms"
+        elif av_sync < 0:
+            timing_indicator = f"Visual shifted later by {abs(av_sync)}ms →"
+
+        # Full display text showing both SOA and correction effect
+        display_text = f"{soa_display} (orig SOA: {soa}ms, corr: {av_sync}ms)\n{timing_indicator}"
+        soa_text = visual.TextStim(win, text=display_text, color="black", height=0.5, pos=(0, 3))
+
+    response_made = False
+    rt = None
+    response = -1
+
+    # Additional elements to draw with the visual stimulus
+    additional_stims = [instructions, trial_counter]
+    if test_mode and soa_text:
+        additional_stims.append(soa_text)
+
+    # Pre-trial setup
+    fixation.draw()
+    for stim in additional_stims:
+        stim.draw()
+    win.flip()
+    core.wait(random.uniform(ITI_MIN, ITI_MAX))  # Random foreperiod
+
+    trial_clock = core.Clock()
+    stim_onset = 0
+
+    if adjusted_soa == 0:
+        # Simultaneous presentation — stim_onset captures the delay from the
+        # two-flip pattern so we can subtract it from RT below.
+        stim_onset = present_stimulus_with_robust_timing(
+            stimulus_type='audiovisual',
+            visual_stim=visual_stim,
+            sound_stim=sound_stim,
+            av_sync=0,
+            additional_stims=additional_stims,
+            trial_clock=trial_clock
+        )
+    elif adjusted_soa < 0:
+        # Audio first: SOA measured from audio ONSET to visual ONSET
+        wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+        # Compensate for display pipeline lag: visual appears 1 frame after flip
+        wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
+        total_frames = wait_frames + VISUAL_FRAMES
+
+        fixation.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.callOnFlip(trial_clock.reset)
+        win.callOnFlip(sound_stim.play)
+        win.flip()
+
+        # Remaining frames: visual starts at wait_frames
+        for frame in range(1, total_frames):
+            fixation.draw()
+            if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.flip()
+    else:
+        # Visual first: SOA measured from visual ONSET to audio ONSET
+        wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
+        # Compensate for display pipeline lag: visual appears 1 frame after flip
+        wait_frames = wait_frames + DISPLAY_LAG_FRAMES
+        total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
+
+        fixation.draw()
+        visual_stim.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.callOnFlip(trial_clock.reset)
+
+        # If SOA rounds to 0 frames, play audio simultaneously
+        if wait_frames == 0:
+            win.callOnFlip(sound_stim.play)
+
+        win.flip()
+
+        # Remaining frames: visual for VISUAL_FRAMES, audio at wait_frames
+        for frame in range(1, total_frames):
+            fixation.draw()
+            if frame < VISUAL_FRAMES:
+                visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+
+            if wait_frames > 0 and frame == wait_frames:
+                win.callOnFlip(sound_stim.play)
+
+            win.flip()
+
+    # Response collection - wait until response or timeout
+    while not response_made:
+        if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
+            print("Response timeout")
+            break
+        fixation.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.flip()
+
+        keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
+        if keys:
+            if 'escape' in keys[0][0]:
+                cleanup()
+            else:
+                rt = keys[0][1] - stim_onset
+                response = 1 if keys[0][0] == '1' else 2
+                response_made = True
+                print(f"Response: {response} at {rt}s")
+
+    sound_stim.stop()
+    return response, rt
+
 def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     print(f"\nStarting SRT trial: {trial_type}")
     av_sync = config.get('av_sync_correction', 0.0)
@@ -1575,6 +1711,287 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
     sound_right.stop()
     return response, rt
 
+
+def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions,
+                     trial_counter):
+    print(f"\nStarting toj_Mod trial: {trial_type}, SOA: {soa}ms, Side: {side}")
+    av_sync = config.get('av_sync_correction', 0.0)
+    adjusted_soa = soa + av_sync
+    print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
+
+    # Create SOA display text for test mode
+    test_mode = config.get('test_mode', False)
+    soa_text = None
+    if test_mode:
+        # Format test mode display text depending on trial type
+        if trial_type == 'audiovisual':
+            side_marker = "L" if side == "left" else "R"
+            if adjusted_soa < 0:  # Audio first (use adjusted SOA for display)
+                soa_display = f"A{side_marker}{abs(adjusted_soa)}V{side_marker}"
+            elif adjusted_soa > 0:  # Visual first
+                soa_display = f"V{side_marker}{adjusted_soa}A{side_marker}"
+            else:  # Simultaneous
+                soa_display = f"AV-SYNC-{side_marker}"
+        elif trial_type == 'visual':
+            first_marker = "L" if side == "left" else "R"
+            second_marker = "R" if side == "left" else "L"
+            if soa == 0:
+                soa_display = "V-SYNC"
+            else:
+                soa_display = f"V{first_marker}{abs(soa)}V{second_marker}"
+        else:  # auditory
+            first_marker = "L" if side == "left" else "R"
+            second_marker = "R" if side == "left" else "L"
+            if soa == 0:
+                soa_display = "A-SYNC"
+            else:
+                soa_display = f"A{first_marker}{abs(soa)}A{second_marker}"
+
+        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (orig: {soa}ms, corr: {av_sync}ms)",
+                                   color="black", height=0.5, pos=(0, 3))
+
+    response_made = False
+    rt = None
+    response = -1
+
+    # Additional elements to draw
+    additional_stims = [instructions, trial_counter]
+    if test_mode and soa_text:
+        additional_stims.append(soa_text)
+
+    # Pre-trial setup
+    fixation.draw()
+    for stim in additional_stims:
+        stim.draw()
+    win.flip()
+    core.wait(random.uniform(ITI_MIN, ITI_MAX))
+
+    trial_clock = core.Clock()
+    stim_onset = 0
+
+    # Handle different trial types
+    if trial_type == 'visual':
+        if side == 'left':
+            first_stim, second_stim = visual_stim_left, visual_stim_right
+        else:
+            first_stim, second_stim = visual_stim_right, visual_stim_left
+
+        if soa == 0:  # Simultaneous
+            # Show both stimuli for full duration
+            fixation.draw()
+            first_stim.draw()
+            second_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+
+            # Use a custom function for bilateral stimulus presentation since
+            # we can't use ensure_visual_presentation with multiple stimuli
+            for frame in range(VISUAL_FRAMES - 1):
+                fixation.draw()
+                first_stim.draw()
+                second_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip(clearBuffer=True)  # Force clean frame rendering
+        else:  # Sequential: SOA measured from first stimulus ONSET to second stimulus ONSET
+            soa_frames = calculate_soa_frames(abs(soa), frame_dur)
+            if soa_frames == 0:
+                soa_frames = 1  # Minimum 1 frame for sequential
+            total_frames = soa_frames + VISUAL_FRAMES
+
+            fixation.draw()
+            first_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+
+            # Present frames: first stim for VISUAL_FRAMES, second stim starts at soa_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                if frame < VISUAL_FRAMES:
+                    first_stim.draw()
+                if frame >= soa_frames and frame < soa_frames + VISUAL_FRAMES:
+                    second_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip()
+
+    elif trial_type == 'auditory':
+        # Stop any playing sounds
+        sound_left.stop()
+        sound_right.stop()
+
+        if side == 'left':
+            first_sound, second_sound = sound_left, sound_right
+        else:
+            first_sound, second_sound = sound_right, sound_left
+
+        if soa == 0:  # Simultaneous bilateral audio
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+
+            # Try PTB prescheduling for both sounds
+            if not schedule_sound_at_flip(win, first_sound, delay_seconds=0.0):
+                win.callOnFlip(first_sound.play)
+            if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
+                win.callOnFlip(second_sound.play)
+            win.flip()
+
+            # Show fixation for consistent duration using time-based method
+            wait_precise_duration(VISUAL_STIM_DURATION * 1000, trial_clock)
+        else:  # Sequential bilateral audio: SOA from first sound ONSET to second sound ONSET
+            soa_frames = calculate_soa_frames(abs(soa), frame_dur)
+            if soa_frames == 0:
+                soa_frames = 1  # Minimum 1 frame for sequential
+            total_frames = soa_frames + VISUAL_FRAMES  # extra frames for second sound to play
+
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+
+            # Try PTB prescheduling for first sound
+            if not schedule_sound_at_flip(win, first_sound, delay_seconds=0.0):
+                win.callOnFlip(first_sound.play)
+            win.flip()
+
+            # Remaining frames: second sound plays at soa_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                for stim in additional_stims:
+                    stim.draw()
+
+                if frame == soa_frames:
+                    if not schedule_sound_at_flip(win, second_sound, delay_seconds=0.0):
+                        win.callOnFlip(second_sound.play)
+
+                win.flip()
+
+    elif trial_type == 'audiovisual':
+        # Stop any playing sounds
+        sound_left.stop()
+        sound_right.stop()
+
+        if side == 'left':
+            visual_stim, sound_stim = visual_stim_left, sound_left
+        else:
+            visual_stim, sound_stim = visual_stim_right, sound_right
+
+        if adjusted_soa == 0:  # Simultaneous audiovisual
+            # Two-flip pattern: first flip resets clock, second presents stimuli.
+            # Capture stim_onset so RT is measured from actual stimulus appearance.
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+            win.flip()
+
+            fixation.draw()
+            visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
+            win.flip()
+            stim_onset = trial_clock.getTime()
+
+            present_stimulus_with_hybrid_timing(visual_stim, VISUAL_STIM_DURATION * 1000, additional_stims, trial_clock)
+
+        elif adjusted_soa < 0:  # Audio first: SOA from audio ONSET to visual ONSET
+            wait_frames = calculate_soa_frames(abs(adjusted_soa), frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = max(0, wait_frames - DISPLAY_LAG_FRAMES)
+            total_frames = wait_frames + VISUAL_FRAMES
+
+            fixation.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+
+            # Try PTB prescheduling for audio onset
+            if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                win.callOnFlip(sound_stim.play)
+            win.flip()
+
+            # Remaining frames: visual starts at wait_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                if frame >= wait_frames and frame < wait_frames + VISUAL_FRAMES:
+                    visual_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+                win.flip()
+
+        else:  # Visual first: SOA from visual ONSET to audio ONSET
+            wait_frames = calculate_soa_frames(adjusted_soa, frame_dur)
+            # Compensate for display pipeline lag
+            wait_frames = wait_frames + DISPLAY_LAG_FRAMES
+            total_frames = max(VISUAL_FRAMES, wait_frames + VISUAL_FRAMES)
+
+            fixation.draw()
+            visual_stim.draw()
+            for stim in additional_stims:
+                stim.draw()
+            win.callOnFlip(trial_clock.reset)
+
+            # Try PTB prescheduling: audio at SOA from visual onset
+            prescheduled = False
+            audio_delay = wait_frames * frame_dur
+            if audio_delay > 0.01:
+                prescheduled = schedule_sound_at_flip(win, sound_stim, delay_seconds=audio_delay)
+
+            # If SOA rounds to 0 frames, play simultaneously
+            if not prescheduled and wait_frames == 0:
+                if not schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
+                    win.callOnFlip(sound_stim.play)
+                prescheduled = True
+
+            win.flip()
+
+            # Remaining frames: visual for VISUAL_FRAMES, audio at wait_frames
+            for frame in range(1, total_frames):
+                fixation.draw()
+                if frame < VISUAL_FRAMES:
+                    visual_stim.draw()
+                for stim in additional_stims:
+                    stim.draw()
+
+                if not prescheduled and frame == wait_frames:
+                    win.callOnFlip(sound_stim.play)
+
+                win.flip()
+
+    # Wait for response with clean frame rendering
+    while not response_made:
+        if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
+            print("Response timeout")
+            break
+        fixation.draw()
+        for stim in additional_stims:
+            stim.draw()
+        win.flip(clearBuffer=True)
+
+        keys = event.getKeys(timeStamped=trial_clock, keyList=['1', '2', 'escape'])
+        if keys:
+            if 'escape' in keys[0][0]:
+                cleanup()
+            else:
+                rt = keys[0][1] - stim_onset
+                response = 1 if keys[0][0] == '1' else 2
+                response_made = True
+                print(f"Response: {response} at {rt}s")
+
+    # Stop all sounds
+    sound_left.stop()
+    sound_right.stop()
+    return response, rt
+
+
 def run_block(block_config, data_filename, config):
     exp_type = block_config['experiment'].lower()
     trials_per_condition = block_config['trials_per_condition']
@@ -1635,6 +2052,32 @@ def run_block(block_config, data_filename, config):
                       for side in ['left', 'right']
                       for _ in range(trials_per_condition)]
 
+    elif exp_type == 'toj':
+        stim_color = [255, 0, 0]  # Red
+        visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
+        sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
+        toj_soas = [-300, -250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250, 300]
+        total_trials = len(toj_soas) * trials_per_condition
+        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black", pos=(0, -7), height=0.5)
+        trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
+        trial_types =toj_soas * trials_per_condition
+
+    elif exp_type == 'toj_mod':
+        stim_color = [255, 0, 0]  # Red
+        visual_stim_left = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(-10, 0))
+        visual_stim_right = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],pos=(10, 0))
+        sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
+        sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
+        toj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
+        total_trials = len(toj_mod_soas) * trials_per_condition * 6  # 6 conditions
+        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black", pos=(0, -7), height=0.5)
+        trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
+        trial_types = [(cond, soa, side)
+                       for cond in ['visual', 'auditory', 'audiovisual']
+                       for soa in toj_mod_soas
+                       for side in ['left', 'right']
+                       for _ in range(trials_per_condition)]
+
     else:
         print(f"Unknown experiment type: {exp_type}")
         return
@@ -1648,6 +2091,12 @@ def run_block(block_config, data_filename, config):
                         "Your task is to judge if they occurred at the same time or not.\n\n"
                         "Press '1' if they seemed to occur at the same time.\n"
                         "Press '2' if they seemed to occur at different times.\n\n"
+                        "Press SPACE to begin.")
+    elif exp_type in ['toj', 'toj_mod']:
+        show_instructions("You will see a red circle and hear a tone.\n"
+                        "Your task is to judge which stimuli came first.\n\n"
+                        "Press '1' if Audio came 1st.\n"
+                        "Press '2' if Visual came 1st.\n\n"
                         "Press SPACE to begin.")
     else:
         show_instructions("Press spacebar when you see or hear a stimulus.\n\n"
@@ -1676,6 +2125,15 @@ def run_block(block_config, data_filename, config):
             trial_counter.text = f"Trial {trial_num}/{total_trials}"
             trial_type, soa, side = trial
             response, rt = run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, trial_counter)
+        elif exp_type == 'toj':
+            trial_counter.text = f"Trial {trial_num}/{total_trials}"
+            soa = trial
+            response, rt = run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter)
+            trial_type = 'audiovisual'
+        elif exp_type == 'toj_mod':
+            trial_counter.text = f"Trial {trial_num}/{total_trials}"
+            trial_type, soa, side = trial
+            response, rt = run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, trial_counter)
         elif exp_type == 'srt':
             trial_type = trial
             rt = run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback)
