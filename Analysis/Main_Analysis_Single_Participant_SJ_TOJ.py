@@ -29,7 +29,7 @@ def logistic(x, PSS, slope):
     return 1 / (1 + np.exp(-(x - PSS) / slope))
 
 #import data
-df = pd.read_csv("data_005_21_f_vandy_offline_20260723_090902.csv")
+df = pd.read_csv("../Data/data_005_21_f_vandy_offline_20260723_090902.csv")
 
 #Separate the 3 data sets
 sj = df[df["Experiment"] == "sj"].copy()
@@ -214,32 +214,32 @@ toj_results.to_csv(
 )
 
 #Create plot
-plt.figure(figsize=(8,5))
-plt.scatter(
-    x_toj,
-    y_toj,
-    color="blue",
-    label="Observed Data"
-)
-plt.plot(
-    xx_toj,
-    yy_toj,
-    color="red",
-    linewidth=2,
-    label="Logistic Fit"
-)
-plt.xlabel("SOA (ms)")
-plt.ylabel("Probability Visual First")
-plt.title("Temporal Order Judgment")
-plt.legend()
-plt.grid(True)
-plt.tight_layout()
-#Save Plot
-plt.savefig(
-    "Results/TOJ_Logistic_Fit.png",
-    dpi=300
-)
-plt.show()
+# plt.figure(figsize=(8,5))
+# plt.scatter(
+#     x_toj,
+#     y_toj,
+#     color="blue",
+#     label="Observed Data"
+# )
+# plt.plot(
+#     xx_toj,
+#     yy_toj,
+#     color="red",
+#     linewidth=2,
+#     label="Logistic Fit"
+# )
+# plt.xlabel("SOA (ms)")
+# plt.ylabel("Probability Visual First")
+# plt.title("Temporal Order Judgment")
+# plt.legend()
+# plt.grid(True)
+# plt.tight_layout()
+# #Save Plot
+# plt.savefig(
+#     "Results/TOJ_Logistic_Fit.png",
+#     dpi=300
+# )
+# plt.show()
 
 #Print TOJ Summary and Plot
 #print("\nTOJ Summary")
