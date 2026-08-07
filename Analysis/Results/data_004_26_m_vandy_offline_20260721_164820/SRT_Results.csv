@@ -1,2 +1,2 @@
-Trials,Valid_Trials,Misses,Anticipations,Mean_Adjusted_RT_ms,Median_Adjusted_RT_ms,SD_Adjusted_RT_ms,CV_Adjusted_RT,Fastest_RT_ms,Slowest_RT_ms,SRT_QC_OK
-300,203,97,0,250.64643990399838,234.0022999746725,67.81287488073082,0.27055191730113637,167.2371000354178,554.3865999975242,False
+Trials,Valid_Trials,Clean_Trials,Misses,Anticipations,Mean_Adjusted_RT_ms,Median_Adjusted_RT_ms,SD_Adjusted_RT_ms,CV_Adjusted_RT,Fastest_RT_ms,Slowest_RT_ms,SRT_QC_OK
+300,203,203,97,0,250.64643990399838,234.0022999746725,67.81287488073082,0.27055191730113637,167.2371000354178,554.3865999975242,False
