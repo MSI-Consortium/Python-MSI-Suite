@@ -29,7 +29,7 @@ def logistic(x, PSS, slope):
     return 1 / (1 + np.exp(-(x - PSS) / slope))
 
 #import data
-df = pd.read_csv("../Data/data_005_21_f_vandy_offline_20260723_090902.csv")
+df = pd.read_csv("../Data/data_003_19_f_vandy_offline_20260717_165618.csv")
 
 #Separate the 3 data sets
 sj = df[df["Experiment"] == "sj"].copy()
@@ -102,30 +102,30 @@ print(f"PSS              : {PSS:.2f} ms")
 print(f"Sigma            : {sigma:.2f} ms")
 print(f"TBW (FWHM)       : {TBW:.2f} ms")
 print(f"R²               : {r_squared:.3f}")
-# plt.figure(figsize=(8,5))
-# plt.scatter(
-#     x,
-#     y,
-#     color="blue",
-#     label="Observed Data"
-# )
-# plt.plot(
-#     xx,
-#     yy,
-#     color="red",
-#     linewidth=2,
-#     label="Gaussian Fit"
-# )
-# plt.xlabel("SOA (ms)")
-# plt.ylabel("Probability Simultaneous")
-# plt.title("Simultaneity Judgment")
-# plt.legend()
-# plt.grid(True)
-# #save plot
-# #plt.tight_layout()
-# #plt.savefig("Results/SJ_Gaussian_Fit.png", dpi=300)
-# #print/show plot
-# plt.show()
+plt.figure(figsize=(8,5))
+plt.scatter(
+    x,
+    y,
+    color="blue",
+    label="Observed Data"
+)
+plt.plot(
+    xx,
+    yy,
+    color="red",
+    linewidth=2,
+    label="Gaussian Fit"
+)
+plt.xlabel("SOA (ms)")
+plt.ylabel("Probability Simultaneous")
+plt.title("Simultaneity Judgment")
+plt.legend()
+plt.grid(True)
+#save plot
+plt.tight_layout()
+plt.savefig("Results/SJ_Gaussian_Fit.png", dpi=300)
+#print/show plot
+plt.show()
 
 ####Print SJ Summary
 # print("\nSJ Summary")
@@ -135,17 +135,17 @@ print(f"R²               : {r_squared:.3f}")
 # print(pd.crosstab(sj["SOA"], sj["Response"]))
 
 ####Basic fitted SJ plot
-# plt.figure(figsize=(6,4))
-# plt.plot(
-#     sj_summary["SOA"],
-#     sj_summary["P_Simultaneous"],
-#     "o-"
-# )
-# plt.xlabel("SOA (ms)")
-# plt.ylabel("Probability Simultaneous")
-# plt.title("SJ Psychometric Function")
-# plt.grid(True)
-# plt.show()
+plt.figure(figsize=(6,4))
+plt.plot(
+    sj_summary["SOA"],
+    sj_summary["P_Simultaneous"],
+    "o-"
+)
+plt.xlabel("SOA (ms)")
+plt.ylabel("Probability Simultaneous")
+plt.title("SJ Psychometric Function")
+plt.grid(True)
+plt.show()
 
 
 
@@ -213,33 +213,33 @@ toj_results.to_csv(
     index=False
 )
 
-#Create plot
-# plt.figure(figsize=(8,5))
-# plt.scatter(
-#     x_toj,
-#     y_toj,
-#     color="blue",
-#     label="Observed Data"
-# )
-# plt.plot(
-#     xx_toj,
-#     yy_toj,
-#     color="red",
-#     linewidth=2,
-#     label="Logistic Fit"
-# )
-# plt.xlabel("SOA (ms)")
-# plt.ylabel("Probability Visual First")
-# plt.title("Temporal Order Judgment")
-# plt.legend()
-# plt.grid(True)
-# plt.tight_layout()
+# Create plot
+plt.figure(figsize=(8,5))
+plt.scatter(
+    x_toj,
+    y_toj,
+    color="blue",
+    label="Observed Data"
+)
+plt.plot(
+    xx_toj,
+    yy_toj,
+    color="red",
+    linewidth=2,
+    label="Logistic Fit"
+)
+plt.xlabel("SOA (ms)")
+plt.ylabel("Probability Visual First")
+plt.title("Temporal Order Judgment")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
 # #Save Plot
-# plt.savefig(
-#     "Results/TOJ_Logistic_Fit.png",
-#     dpi=300
-# )
-# plt.show()
+plt.savefig(
+    "Results/TOJ_Logistic_Fit.png",
+    dpi=300
+)
+plt.show()
 
 #Print TOJ Summary and Plot
 #print("\nTOJ Summary")
@@ -249,15 +249,15 @@ toj_results.to_csv(
 #print(pd.crosstab(toj["SOA"], toj["Response"]))
 
 ####Basic TOJ Fitted TOJ plot
-# plt.figure(figsize=(6,4))
-# plt.plot(
-#     toj_summary["SOA"],
-#     toj_summary["P_Visual_First"],
-#     "o-"
-# )
-# plt.xlabel("SOA (ms)")
-# plt.ylabel("Probability Visual First")
-# plt.title("TOJ Psychometric Function")
-# plt.grid(True)
-# plt.show()
+plt.figure(figsize=(6,4))
+plt.plot(
+    toj_summary["SOA"],
+    toj_summary["P_Visual_First"],
+    "o-"
+)
+plt.xlabel("SOA (ms)")
+plt.ylabel("Probability Visual First")
+plt.title("TOJ Psychometric Function")
+plt.grid(True)
+plt.show()
 

@@ -2030,11 +2030,39 @@ def run_block(block_config, data_filename, config):
         stim_color = [255, 0, 0]  # Red
         visual_stim = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
-        sj_soas = [-300, -250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250, 300]
-        total_trials = len(sj_soas) * trials_per_condition
-        instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black", pos=(0, -7), height=0.5)
-        trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
-        trial_types = sj_soas * trials_per_condition
+        # Non-synchronous SOAs
+        sj_nonzero_soas = [
+            -300, -250, -200, -150, -100, -50,
+            50, 100, 150, 200, 250, 300
+        ]
+
+        # Each nonzero SOA occurs trials_per_condition times
+        nonzero_trials = sj_nonzero_soas * trials_per_condition
+
+        # Make synchronous (0 ms) trials equal 50% of the block.
+        # Therefore, number of 0-ms trials = total number of nonzero trials.
+        zero_trials = [0] * len(nonzero_trials)
+
+        # Combine them: 50% synchronous, 50% asynchronous
+        trial_types = zero_trials + nonzero_trials
+
+        total_trials = len(trial_types)
+
+        instructions = visual.TextStim(
+            win,
+            text="Press '1' for Same Time, '2' for Different Time",
+            color="black",
+            pos=(0, -7),
+            height=0.5
+        )
+
+        trial_counter = visual.TextStim(
+            win,
+            text="",
+            color="black",
+            pos=(0, -8),
+            height=0.5
+        )
         
     elif exp_type == 'sj_mod':
         stim_color = [255, 0, 0]  # Red
@@ -2046,7 +2074,7 @@ def run_block(block_config, data_filename, config):
         total_trials = len(sj_mod_soas) * trials_per_condition * 6  # 6 conditions
         instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black", pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
-        trial_types = [(cond, soa, side) 
+        trial_types = [(cond, soa, side)
                       for cond in ['visual', 'auditory', 'audiovisual']
                       for soa in sj_mod_soas
                       for side in ['left', 'right']

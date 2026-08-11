@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 
 #Define Logistic Function - TOJ
 def logistic(x, PSS, slope):
@@ -93,6 +94,18 @@ def analyze_toj(
         # Predicted values
         y_fit = logistic(x, *params)
 
+        # Smooth curve for plotting
+        x_smooth = np.linspace(
+            x.min(),
+            x.max(),
+            500
+        )
+
+        y_smooth = logistic(
+            x_smooth,
+            *params
+        )
+
         # R-squared
         ss_res = np.sum((y - y_fit) ** 2)
         ss_tot = np.sum((y - np.mean(y)) ** 2)
@@ -117,19 +130,106 @@ def analyze_toj(
         r_squared = np.nan
         TOJ_Fit_OK = False
 
+        x_smooth = None
+        y_smooth = None
+
+    # Save individual TOJ results
+    # Create dictionary of trial counts for each SOA
+    soa_trial_counts = {
+        f"Trials_SOA_{int(row['SOA'])}ms": int(row["Trials"])
+        for _, row in toj_summary.iterrows()
+    }
+
     # Save individual TOJ results
     toj_results = pd.DataFrame({
         "PSS_ms": [PSS],
         "Slope": [slope],
         "JND_ms": [JND],
         "R2": [r_squared],
-        "TOJ_Fit_OK": [TOJ_Fit_OK]
+        "TOJ_Fit_OK": [TOJ_Fit_OK],
+        **soa_trial_counts
     })
 
     toj_results.to_csv(
         os.path.join(participant_folder, "TOJ_Results.csv"),
         index=False
     )
+
+    # --------------------------------
+    # Raw TOJ Plot
+    # --------------------------------
+
+    plt.figure(figsize=(8, 5))
+
+    plt.plot(
+        x,
+        y,
+        "o-",
+        linewidth=2,
+        label="Observed Data"
+    )
+
+    plt.xlabel("SOA (ms)")
+    plt.ylabel("Probability Visual First")
+    plt.title("Temporal Order Judgment - Raw Data")
+
+    plt.ylim(0, 1)
+
+    plt.grid(True)
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(
+            participant_folder,
+            "TOJ_Raw.png"
+        ),
+        dpi=300
+    )
+
+    plt.close()
+
+    # --------------------------------
+    # Fitted TOJ Plot
+    # --------------------------------
+
+    plt.figure(figsize=(8, 5))
+
+    # Observed data
+    plt.plot(
+        x,
+        y,
+        "o",
+        label="Observed Data"
+    )
+
+    # Logistic fit
+    if x_smooth is not None:
+        plt.plot(
+            x_smooth,
+            y_smooth,
+            linewidth=2,
+            label="Logistic Fit"
+        )
+
+    plt.xlabel("SOA (ms)")
+    plt.ylabel("Probability Visual First")
+    plt.title("Temporal Order Judgment - Logistic Fit")
+
+    plt.ylim(0, 1)
+
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(
+            participant_folder,
+            "TOJ_Fitted.png"
+        ),
+        dpi=300
+    )
+
+    plt.close()
 
     # Print summary
     print("\n===================================")

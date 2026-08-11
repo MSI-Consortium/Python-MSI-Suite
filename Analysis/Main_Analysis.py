@@ -149,6 +149,7 @@ def analyze_participant(
     ####################################################
     participant_summary = {
         "Participant_ID": participant_id,
+        "Source_File": participant_name,
         "Age": age,
         "Gender": gender,
         "Site": site,

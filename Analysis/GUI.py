@@ -19,14 +19,20 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QDoubleSpinBox,
     QSpinBox,
+    QDialog,
+    QComboBox,
+    QHeaderView,
 )
 
 from Main_Analysis import analyze_files
+from analysis.pdf_report import generate_pdf_report
 from PySide6.QtCore import (
     QObject,
     QThread,
-    Signal
+    Signal,
+    Qt
 )
+from PySide6.QtGui import QPixmap
 
 class AnalysisWorker(QObject):
 
@@ -90,6 +96,389 @@ class AnalysisWorker(QObject):
             filename
         )
 
+
+class PlotViewer(QDialog):
+
+    def __init__(
+        self,
+        plot_files,
+        parent=None
+    ):
+        super().__init__(parent)
+
+        self.plot_files = plot_files
+        self.current_index = 0
+
+        self.setWindowTitle(
+            "MSI Plot Viewer"
+        )
+
+        self.resize(
+            1000,
+            750
+        )
+
+        self.setup_ui()
+
+        self.populate_dropdowns()
+
+        self.show_current_plot()
+
+    # ==================================================
+    # Build Plot Viewer
+    # ==================================================
+
+    def setup_ui(self):
+
+        layout = QVBoxLayout()
+
+        # -------------------------
+        # Plot selection controls
+        # -------------------------
+
+        selection_layout = QHBoxLayout()
+
+        participant_label = QLabel(
+            "Participant:"
+        )
+
+        self.participant_combo = QComboBox()
+
+        plot_type_label = QLabel(
+            "Plot:"
+        )
+
+        self.plot_type_combo = QComboBox()
+
+        selection_layout.addWidget(
+            participant_label
+        )
+
+        selection_layout.addWidget(
+            self.participant_combo
+        )
+
+        selection_layout.addWidget(
+            plot_type_label
+        )
+
+        selection_layout.addWidget(
+            self.plot_type_combo
+        )
+
+        layout.addLayout(
+            selection_layout
+        )
+
+        # -------------------------
+        # Plot title
+        # -------------------------
+
+        self.plot_title = QLabel()
+
+        self.plot_title.setAlignment(
+            Qt.AlignCenter
+        )
+
+        self.plot_title.setStyleSheet(
+            "font-size: 18px; "
+            "font-weight: bold;"
+        )
+
+        layout.addWidget(
+            self.plot_title
+        )
+
+        # -------------------------
+        # Plot image
+        # -------------------------
+
+        self.image_label = QLabel()
+
+        self.image_label.setAlignment(
+            Qt.AlignCenter
+        )
+
+        self.image_label.setMinimumSize(
+            800,
+            550
+        )
+
+        layout.addWidget(
+            self.image_label
+        )
+
+        # -------------------------
+        # Plot counter
+        # -------------------------
+
+        self.counter_label = QLabel()
+
+        self.counter_label.setAlignment(
+            Qt.AlignCenter
+        )
+
+        layout.addWidget(
+            self.counter_label
+        )
+
+        # -------------------------
+        # Navigation
+        # -------------------------
+
+        navigation_layout = QHBoxLayout()
+
+        self.previous_button = QPushButton(
+            "Previous"
+        )
+
+        self.next_button = QPushButton(
+            "Next"
+        )
+
+        navigation_layout.addWidget(
+            self.previous_button
+        )
+
+        navigation_layout.addWidget(
+            self.next_button
+        )
+
+        layout.addLayout(
+            navigation_layout
+        )
+
+        self.setLayout(layout)
+
+        # -------------------------
+        # Connections
+        # -------------------------
+
+        self.previous_button.clicked.connect(
+            self.previous_plot
+        )
+
+        self.next_button.clicked.connect(
+            self.next_plot
+        )
+
+        self.participant_combo.currentTextChanged.connect(
+            self.jump_to_selection
+        )
+
+        self.plot_type_combo.currentTextChanged.connect(
+            self.jump_to_selection
+        )
+
+    # ==================================================
+    # Populate Dropdowns
+    # ==================================================
+
+    def populate_dropdowns(self):
+
+        participants = []
+        plot_types = []
+
+        for plot in self.plot_files:
+
+            participant = str(
+                plot["participant"]
+            )
+
+            plot_name = plot["name"]
+
+            if participant not in participants:
+
+                participants.append(
+                    participant
+                )
+
+            if plot_name not in plot_types:
+
+                plot_types.append(
+                    plot_name
+                )
+
+        self.participant_combo.addItems(
+            participants
+        )
+
+        self.plot_type_combo.addItems(
+            plot_types
+        )
+
+    # ==================================================
+    # Jump directly to selected plot
+    # ==================================================
+
+    def jump_to_selection(self):
+
+        participant = (
+            self.participant_combo.currentText()
+        )
+
+        plot_name = (
+            self.plot_type_combo.currentText()
+        )
+
+        if not participant or not plot_name:
+            return
+
+        for index, plot in enumerate(
+            self.plot_files
+        ):
+
+            if (
+                str(plot["participant"])
+                == participant
+                and plot["name"]
+                == plot_name
+            ):
+
+                self.current_index = index
+
+                self.show_current_plot()
+
+                return
+
+    # ==================================================
+    # Display Current Plot
+    # ==================================================
+
+    def show_current_plot(self):
+
+        if not self.plot_files:
+            return
+
+        plot_info = self.plot_files[
+            self.current_index
+        ]
+
+        plot_path = plot_info["path"]
+        participant = plot_info["participant"]
+        plot_name = plot_info["name"]
+
+        # -------------------------
+        # Synchronize dropdowns
+        # -------------------------
+
+        self.participant_combo.blockSignals(
+            True
+        )
+
+        self.plot_type_combo.blockSignals(
+            True
+        )
+
+        self.participant_combo.setCurrentText(
+            str(participant)
+        )
+
+        self.plot_type_combo.setCurrentText(
+            plot_name
+        )
+
+        self.participant_combo.blockSignals(
+            False
+        )
+
+        self.plot_type_combo.blockSignals(
+            False
+        )
+
+        # -------------------------
+        # Load image
+        # -------------------------
+
+        pixmap = QPixmap(
+            plot_path
+        )
+
+        if pixmap.isNull():
+
+            self.image_label.setText(
+                "Unable to load plot."
+            )
+
+            return
+
+        pixmap = pixmap.scaled(
+            self.image_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+
+        self.image_label.setPixmap(
+            pixmap
+        )
+
+        # -------------------------
+        # Labels
+        # -------------------------
+
+        self.plot_title.setText(
+            f"Participant {participant} - "
+            f"{plot_name}"
+        )
+
+        self.counter_label.setText(
+            f"Plot "
+            f"{self.current_index + 1} "
+            f"of {len(self.plot_files)}"
+        )
+
+        # -------------------------
+        # Navigation availability
+        # -------------------------
+
+        self.previous_button.setEnabled(
+            self.current_index > 0
+        )
+
+        self.next_button.setEnabled(
+            self.current_index
+            < len(self.plot_files) - 1
+        )
+
+    # ==================================================
+    # Previous Plot
+    # ==================================================
+
+    def previous_plot(self):
+
+        if self.current_index > 0:
+
+            self.current_index -= 1
+
+            self.show_current_plot()
+
+    # ==================================================
+    # Next Plot
+    # ==================================================
+
+    def next_plot(self):
+
+        if (
+            self.current_index
+            < len(self.plot_files) - 1
+        ):
+
+            self.current_index += 1
+
+            self.show_current_plot()
+
+    # ==================================================
+    # Resize Plot With Window
+    # ==================================================
+
+    def resizeEvent(self, event):
+
+        super().resizeEvent(event)
+
+        if self.plot_files:
+
+            self.show_current_plot()
+
 class MSIAnalysisGUI(QWidget):
 
     # ==================================================
@@ -103,7 +492,7 @@ class MSIAnalysisGUI(QWidget):
         self.output_folder = "Results"
 
         self.setWindowTitle("MSI Analysis Suite")
-        self.resize(700, 550)
+        self.resize(1200, 750)
 
         self.setup_ui()
 
@@ -114,6 +503,15 @@ class MSIAnalysisGUI(QWidget):
     def setup_ui(self):
 
         main_layout = QVBoxLayout()
+
+        # Main two-column content area
+        content_layout = QHBoxLayout()
+
+        # Left side = controls
+        control_layout = QVBoxLayout()
+
+        # Right side = progress and results
+        results_layout = QVBoxLayout()
 
         # -------------------------
         # Title
@@ -136,11 +534,14 @@ class MSIAnalysisGUI(QWidget):
             "Selected Participant Files"
         )
 
-        main_layout.addWidget(participant_label)
+        control_layout.addWidget(participant_label)
 
         self.file_list = QListWidget()
+        self.file_list.setMaximumHeight(
+            140
+        )
 
-        main_layout.addWidget(self.file_list)
+        control_layout.addWidget(self.file_list)
 
         file_button_layout = QHBoxLayout()
 
@@ -160,7 +561,7 @@ class MSIAnalysisGUI(QWidget):
             self.clear_button
         )
 
-        main_layout.addLayout(
+        control_layout.addLayout(
             file_button_layout
         )
 
@@ -176,7 +577,7 @@ class MSIAnalysisGUI(QWidget):
             "font-weight: bold;"
         )
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             analysis_title
         )
 
@@ -197,15 +598,15 @@ class MSIAnalysisGUI(QWidget):
         self.toj_checkbox.setChecked(True)
         self.srt_checkbox.setChecked(True)
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.sj_checkbox
         )
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.toj_checkbox
         )
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.srt_checkbox
         )
 
@@ -343,7 +744,7 @@ class MSIAnalysisGUI(QWidget):
 
         qc_group.setLayout(qc_layout)
 
-        main_layout.addWidget(qc_group)
+        control_layout.addWidget(qc_group)
 
         # -------------------------
         # Output folder
@@ -353,13 +754,13 @@ class MSIAnalysisGUI(QWidget):
             "Output Folder"
         )
 
-        main_layout.addWidget(output_title)
+        control_layout.addWidget(output_title)
 
         self.output_label = QLabel(
             self.output_folder
         )
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.output_label
         )
 
@@ -367,7 +768,7 @@ class MSIAnalysisGUI(QWidget):
             "Select Output Folder"
         )
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.output_button
         )
 
@@ -377,13 +778,27 @@ class MSIAnalysisGUI(QWidget):
 
         self.run_button.setMinimumHeight(45)
 
-        main_layout.addWidget(
+        control_layout.addWidget(
             self.run_button
         )
+
+        control_layout.addStretch()
 
         # -------------------------
         # Progress
         # -------------------------
+
+        progress_title = QLabel(
+            "Analysis Progress"
+        )
+
+        progress_title.setStyleSheet(
+            "font-weight: bold;"
+        )
+
+        results_layout.addWidget(
+            progress_title
+        )
 
         self.progress_bar = QProgressBar()
 
@@ -391,7 +806,7 @@ class MSIAnalysisGUI(QWidget):
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
 
-        main_layout.addWidget(
+        results_layout.addWidget(
             self.progress_bar
         )
 
@@ -399,7 +814,7 @@ class MSIAnalysisGUI(QWidget):
             ""
         )
 
-        main_layout.addWidget(
+        results_layout.addWidget(
             self.progress_detail_label
         )
 
@@ -411,13 +826,11 @@ class MSIAnalysisGUI(QWidget):
             "Ready"
         )
 
-        main_layout.addWidget(
+        results_layout.addWidget(
             self.status_label
         )
 
-        # Apply layout
-        self.setLayout(main_layout)
-
+        results_layout.addSpacing(20)
         # -------------------------
         # QC Results
         # -------------------------
@@ -430,11 +843,13 @@ class MSIAnalysisGUI(QWidget):
             "font-weight: bold;"
         )
 
-        main_layout.addWidget(
-            results_title
+        results_layout.addWidget(
+            results_title,
         )
 
         self.results_table = QTableWidget()
+        self.results_table.setMinimumHeight(250)
+        self.results_table.setMaximumHeight(350)
 
         self.results_table.setColumnCount(5)
 
@@ -446,10 +861,66 @@ class MSIAnalysisGUI(QWidget):
             "Overall"
         ])
 
+        self.results_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.Stretch
+        )
+
         self.results_table.setRowCount(0)
 
-        main_layout.addWidget(
+        results_layout.addWidget(
             self.results_table
+        )
+
+        # -------------------------
+        # Plot Viewer
+        # -------------------------
+
+        self.view_plots_button = QPushButton(
+            "View Participant Plots"
+        )
+
+        self.pdf_report_button = QPushButton(
+            "Generate PDF Report"
+        )
+
+        self.pdf_report_button.setEnabled(
+            False
+        )
+
+        results_layout.addWidget(
+            self.pdf_report_button
+        )
+
+        self.view_plots_button.setEnabled(
+            False
+        )
+
+        results_layout.addWidget(
+            self.view_plots_button
+        )
+
+        results_layout.addStretch()
+
+        # -------------------------
+        # Assemble two-column layout
+        # -------------------------
+
+        content_layout.addLayout(
+            control_layout,
+            2
+        )
+
+        content_layout.addLayout(
+            results_layout,
+            3
+        )
+
+        main_layout.addLayout(
+            content_layout
+        )
+
+        self.setLayout(
+            main_layout
         )
 
         # -------------------------
@@ -478,6 +949,14 @@ class MSIAnalysisGUI(QWidget):
 
         self.results_table.cellClicked.connect(
             self.show_qc_details
+        )
+
+        self.view_plots_button.clicked.connect(
+            self.open_plot_viewer
+        )
+
+        self.pdf_report_button.clicked.connect(
+            self.generate_report
         )
     # ==================================================
     # Select participants
@@ -625,6 +1104,8 @@ class MSIAnalysisGUI(QWidget):
                 self.max_mean_rt_spin.value()
         }
 
+        self.current_qc_settings = qc_settings.copy()
+
         if not any([
             run_sj,
             run_toj,
@@ -745,6 +1226,14 @@ class MSIAnalysisGUI(QWidget):
             results
         )
 
+        self.view_plots_button.setEnabled(
+            True
+        )
+
+        self.pdf_report_button.setEnabled(
+            True
+        )
+
         self.status_label.setText(
             f"Complete - "
             f"{len(results)} participant(s) analyzed"
@@ -782,6 +1271,161 @@ class MSIAnalysisGUI(QWidget):
             error_message
         )
 
+    def open_plot_viewer(self):
+
+        plot_files = []
+
+        # Plot filenames and display names
+        plot_types = [
+            (
+                "SJ_Raw.png",
+                "SJ Raw"
+            ),
+            (
+                "SJ_Fitted.png",
+                "SJ Fitted"
+            ),
+            (
+                "TOJ_Raw.png",
+                "TOJ Raw"
+            ),
+            (
+                "TOJ_Fitted.png",
+                "TOJ Fitted"
+            ),
+            (
+                "SRT_Histogram.png",
+                "SRT Histogram"
+            )
+        ]
+
+        # Look through selected participants
+        for file in self.selected_files:
+
+            participant_folder_name = (
+                os.path.splitext(
+                    os.path.basename(file)
+                )[0]
+            )
+
+            participant_folder = os.path.join(
+                self.output_folder,
+                participant_folder_name
+            )
+
+            # Use participant ID for display
+            participant_display = (
+                participant_folder_name
+            )
+
+            # Look up actual Participant_ID
+            if hasattr(
+                    self,
+                    "current_results"
+            ):
+                matching_rows = (
+                    self.current_results[
+                        self.current_results[
+                            "Source_File"
+                        ]
+                        == participant_folder_name
+                        ]
+                )
+
+                if not matching_rows.empty:
+                    participant_display = str(
+                        matching_rows.iloc[0][
+                            "Participant_ID"
+                        ]
+                    )
+
+            for filename, display_name in plot_types:
+
+                plot_path = os.path.join(
+                    participant_folder,
+                    filename
+                )
+
+                # Only add plots that actually exist
+                if os.path.exists(
+                        plot_path
+                ):
+                    plot_files.append({
+                        "path": plot_path,
+                        "participant":
+                            participant_display,
+                        "name":
+                            display_name
+                    })
+
+        # No plots found
+        if not plot_files:
+            QMessageBox.warning(
+                self,
+                "No Plots Found",
+                "No participant plots were found "
+                "in the selected output folder."
+            )
+
+            return
+
+        # Open viewer
+        viewer = PlotViewer(
+            plot_files,
+            self
+        )
+
+        viewer.exec()
+
+    def generate_report(self):
+
+        if not hasattr(
+                self,
+                "current_results"
+        ):
+            QMessageBox.warning(
+                self,
+                "No Results",
+                "Run an analysis before generating a PDF report."
+            )
+
+            return
+
+        if not hasattr(
+                self,
+                "current_qc_settings"
+        ):
+            QMessageBox.warning(
+                self,
+                "No QC Settings",
+                "The QC settings used for this analysis "
+                "could not be found."
+            )
+
+            return
+
+        try:
+
+            pdf_path = generate_pdf_report(
+                self.current_results,
+                self.output_folder,
+                self.current_qc_settings
+            )
+
+            QMessageBox.information(
+                self,
+                "PDF Report Created",
+                f"PDF report successfully created:\n\n"
+                f"{pdf_path}"
+            )
+
+        except Exception as error:
+
+            QMessageBox.critical(
+                self,
+                "PDF Report Error",
+                str(error)
+            )
     # ==================================================
     #Data Chart Creation
     # ==================================================

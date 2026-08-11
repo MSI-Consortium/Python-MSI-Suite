@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
 
 
 #Define Gaussian Function - SJ
@@ -86,7 +87,20 @@ def analyze_sj(
             gaussian,
             x,
             y,
-            p0=initial_guess
+            p0=initial_guess,
+            bounds=(
+                [
+                    0.0,  # A minimum
+                    x.min(),  # PSS minimum
+                    0.001  # sigma minimum
+                ],
+                [
+                    1.0,  # A maximum
+                    x.max(),  # PSS maximum
+                    np.inf  # sigma maximum
+                ]
+            ),
+            maxfev=10000
         )
 
         A, PSS, sigma = params
@@ -96,6 +110,18 @@ def analyze_sj(
 
         # Predicted values
         y_fit = gaussian(x, *params)
+
+        # Smooth curve for plotting
+        x_smooth = np.linspace(
+            x.min(),
+            x.max(),
+            500
+        )
+
+        y_smooth = gaussian(
+            x_smooth,
+            *params
+        )
 
         # R-squared
         ss_res = np.sum((y - y_fit) ** 2)
@@ -119,6 +145,16 @@ def analyze_sj(
         r_squared = np.nan
         SJ_Fit_OK = False
 
+        x_smooth = None
+        y_smooth = None
+
+    # Save individual SJ results
+    # Create dictionary of trial counts for each SOA
+    soa_trial_counts = {
+        f"Trials_SOA_{int(row['SOA'])}ms": int(row["Trials"])
+        for _, row in sj_summary.iterrows()
+    }
+
     # Save individual SJ results
     sj_results = pd.DataFrame({
         "Peak_Probability": [A],
@@ -126,13 +162,108 @@ def analyze_sj(
         "Sigma_ms": [sigma],
         "TBW_ms": [TBW],
         "R2": [r_squared],
-        "SJ_Fit_OK": [SJ_Fit_OK]
+        "SJ_Fit_OK": [SJ_Fit_OK],
+        **soa_trial_counts
     })
 
     sj_results.to_csv(
         os.path.join(participant_folder, "SJ_Results.csv"),
         index=False
     )
+
+    # --------------------------------
+    # Raw SJ Plot
+    # --------------------------------
+
+    plt.figure(figsize=(8, 5))
+
+    plt.plot(
+        x,
+        y,
+        "o-",
+        linewidth=2,
+        label="Observed Data"
+    )
+
+    plt.xlabel("SOA (ms)")
+    plt.ylabel("Probability Simultaneous")
+    plt.title("Simultaneity Judgment - Raw Data")
+
+    plt.ylim(0, 1.05)
+
+    plt.grid(True)
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(
+            participant_folder,
+            "SJ_Raw.png"
+        ),
+        dpi=300
+    )
+
+    plt.close()
+
+    # --------------------------------
+    # Fitted SJ Plot
+    # --------------------------------
+
+    plt.figure(figsize=(8, 5))
+
+    # Observed data
+    plt.plot(
+        x,
+        y,
+        "o",
+        label="Observed Data"
+    )
+
+    # Gaussian fit
+    if x_smooth is not None:
+        plt.plot(
+            x_smooth,
+            y_smooth,
+            linewidth=2,
+            label="Gaussian Fit"
+        )
+
+    plt.xlabel("SOA (ms)")
+    plt.ylabel("Probability Simultaneous")
+    plt.title("Simultaneity Judgment - Gaussian Fit")
+
+    if y_smooth is not None:
+
+        y_max = max(
+            1.0,
+            np.max(y),
+            np.max(y_smooth)
+        )
+
+    else:
+
+        y_max = max(
+            1.0,
+            np.max(y)
+        )
+
+    plt.ylim(
+        -0.05,
+        y_max + 0.05
+    )
+
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    plt.savefig(
+        os.path.join(
+            participant_folder,
+            "SJ_Fitted.png"
+        ),
+        dpi=300
+    )
+
+    plt.close()
 
     # Print summary
     print("\n===================================")

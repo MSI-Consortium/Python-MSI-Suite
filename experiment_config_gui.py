@@ -56,7 +56,12 @@ class BlockConfig(QGroupBox):
         estimated_time = 0
 
         if exp_type == 'SJ':
-            total_trials = trials_per_condition * 13  # 13 SOA conditions
+            num_nonzero_soas = 12
+            # 12 asynchronous SOAs × N repetitions,
+            # plus an equal number of synchronous (0-ms) trials
+            asynchronous_trials = num_nonzero_soas * trials_per_condition
+            synchronous_trials = asynchronous_trials
+            total_trials = asynchronous_trials + synchronous_trials
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
         elif exp_type == 'TOJ':
             total_trials = trials_per_condition * 13  # 13 SOA conditions
@@ -681,7 +686,7 @@ class ExperimentConfigApp(QWidget):
                 return
                 
             self.last_saved_file = filename
-        
+
         # Now we have a valid saved file that matches the current configuration
         
         # Proceed to run the experiment
