@@ -1,2 +1,2 @@
-Peak_Probability,PSS_ms,Sigma_ms,TBW_ms,R2,SJ_Fit_OK,Trials_SOA_-300ms,Trials_SOA_-250ms,Trials_SOA_-200ms,Trials_SOA_-150ms,Trials_SOA_-100ms,Trials_SOA_-50ms,Trials_SOA_0ms,Trials_SOA_50ms,Trials_SOA_100ms,Trials_SOA_150ms,Trials_SOA_200ms,Trials_SOA_250ms,Trials_SOA_300ms
-0.9999999999999999,-60.990152300766226,258.2526419218458,608.1849717259469,0.7628487547898873,False,30,30,30,30,30,30,30,30,30,30,30,30,30
+Peak_Probability,PSS_ms,Sigma_ms,TBW_ms,R2,SJ_Fit_OK,SJ_Catch_Trials,SJ_Catch_Correct,SJ_Catch_OK,Trials_SOA_-300ms,Trials_SOA_-250ms,Trials_SOA_-200ms,Trials_SOA_-150ms,Trials_SOA_-100ms,Trials_SOA_-50ms,Trials_SOA_0ms,Trials_SOA_50ms,Trials_SOA_100ms,Trials_SOA_150ms,Trials_SOA_200ms,Trials_SOA_250ms,Trials_SOA_300ms
+0.9999999999999999,-60.990152300766226,258.2526419218458,608.1849717259469,0.7628487547898873,False,0,0,False,30,30,30,30,30,30,30,30,30,30,30,30,30

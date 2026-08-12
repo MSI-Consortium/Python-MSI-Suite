@@ -1,2 +1,2 @@
-PSS_ms,Slope,JND_ms,R2,TOJ_Fit_OK,Trials_SOA_-300ms,Trials_SOA_-250ms,Trials_SOA_-200ms,Trials_SOA_-150ms,Trials_SOA_-100ms,Trials_SOA_-50ms,Trials_SOA_0ms,Trials_SOA_50ms,Trials_SOA_100ms,Trials_SOA_150ms,Trials_SOA_200ms,Trials_SOA_250ms,Trials_SOA_300ms
-532.2293534382542,132.10080182100762,145.1275642234696,0.5777914207723431,False,30,30,30,30,30,30,30,30,30,30,30,30,30
+PSS_ms,Slope,JND_ms,R2,TOJ_Fit_OK,TOJ_Catch_Trials,TOJ_Catch_Correct,TOJ_Catch_OK,Trials_SOA_-300ms,Trials_SOA_-250ms,Trials_SOA_-200ms,Trials_SOA_-150ms,Trials_SOA_-100ms,Trials_SOA_-50ms,Trials_SOA_0ms,Trials_SOA_50ms,Trials_SOA_100ms,Trials_SOA_150ms,Trials_SOA_200ms,Trials_SOA_250ms,Trials_SOA_300ms
+532.2293534382542,132.10080182100762,145.1275642234696,0.5777914207723431,False,0,0,False,30,30,30,30,30,30,30,30,30,30,30,30,30
