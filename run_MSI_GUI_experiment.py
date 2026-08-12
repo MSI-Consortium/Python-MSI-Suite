@@ -28,8 +28,7 @@ from psychopy import sound
 # DATA STORAGE
 # =========================================================
 
-DATA_ROOT = r"C:\Users\multi\OneDrive\Documents\github\Python-MSI-Suite\Data"
-
+DATA_ROOT = r"C:\Users\multi\Github\Python-MSI-Suite\Data"
 
 def get_participant_folder(participant_id):
     participant_id = str(participant_id).zfill(3)

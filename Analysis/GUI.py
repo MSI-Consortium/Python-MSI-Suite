@@ -493,7 +493,7 @@ class MSIAnalysisGUI(QWidget):
         self.output_folder = "Results"
 
         self.data_root = (
-            r"C:\Users\multi\OneDrive\Documents\github"
+            r"C:\Users\multi\Github"
             r"\Python-MSI-Suite\Data"
         )
 

@@ -1,11 +1,11 @@
 {
-  "participant_id": "001b",
+  "participant_id": "001d",
   "age": 4,
   "gender": "m",
   "site": "vandy",
   "fullscreen": false,
   "test_mode": false,
-  "offline_mode": false,
+  "offline_mode": true,
   "api_url": "[insert your url here]",
   "api_token": " [insert your api key here]",
   "av_sync_correction": 0.0,
@@ -22,12 +22,12 @@
   ],
   "blocks": [
     {
-      "experiment": "SRT",
+      "experiment": "SJ",
       "block_number": 1,
       "trials_per_condition": 1,
-      "total_trials": 3,
-      "estimated_time": 0.1
+      "total_trials": 34,
+      "estimated_time": 1.2
     }
   ],
-  "total_estimated_time": 0.1
+  "total_estimated_time": 1.2
 }
