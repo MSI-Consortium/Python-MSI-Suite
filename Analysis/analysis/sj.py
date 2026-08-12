@@ -29,6 +29,16 @@ def analyze_sj(
     Returns a dictionary containing SJ results and QC measures.
     """
 
+    # Catch-trial QC: |SOA| == 1000 ms. Correct SJ response is "Different Time" (2).
+    catch_mask = sj["SOA"].abs() == 1000
+    sj_catch = sj.loc[catch_mask].copy()
+    sj_catch_trials = len(sj_catch)
+    sj_catch_correct = int((sj_catch["Response"] == 2).sum())
+    SJ_Catch_OK = sj_catch_trials == 10 and sj_catch_correct >= 8
+
+    # Exclude catch trials from the psychometric fit and ordinary response-bias QC.
+    sj = sj.loc[~catch_mask].copy()
+
     # Convert response to binary:
     # 1 = Simultaneous
     # 0 = Not Simultaneous
@@ -163,6 +173,9 @@ def analyze_sj(
         "TBW_ms": [TBW],
         "R2": [r_squared],
         "SJ_Fit_OK": [SJ_Fit_OK],
+        "SJ_Catch_Trials": [sj_catch_trials],
+        "SJ_Catch_Correct": [sj_catch_correct],
+        "SJ_Catch_OK": [SJ_Catch_OK],
         **soa_trial_counts
     })
 
@@ -282,6 +295,9 @@ def analyze_sj(
     # Return everything Main_Analysis needs
     return {
         "SJ_Trials": sj_trials,
+        "SJ_Catch_Trials": sj_catch_trials,
+        "SJ_Catch_Correct": sj_catch_correct,
+        "SJ_Catch_OK": SJ_Catch_OK,
         "SJ_Valid_Trials": sj_valid_trials,
 
         "SJ_Simultaneous": sj_simultaneous,
@@ -299,4 +315,3 @@ def analyze_sj(
         "SJ_R2": r_squared,
         "SJ_Fit_OK": SJ_Fit_OK
     }
-

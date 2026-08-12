@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QComboBox,
     QHeaderView,
+    QScrollArea,
 )
 
 from Main_Analysis import analyze_files
@@ -491,8 +492,15 @@ class MSIAnalysisGUI(QWidget):
         self.selected_files = []
         self.output_folder = "Results"
 
+        self.data_root = (
+            r"C:\Users\multi\OneDrive\Documents\github"
+            r"\Python-MSI-Suite\Data"
+        )
+
+        self.participant_checkboxes = {}
+
         self.setWindowTitle("MSI Analysis Suite")
-        self.resize(1200, 750)
+        self.resize(1200, 900)
 
         self.setup_ui()
 
@@ -531,38 +539,66 @@ class MSIAnalysisGUI(QWidget):
         # -------------------------
 
         participant_label = QLabel(
-            "Selected Participant Files"
-        )
-
-        control_layout.addWidget(participant_label)
-
-        self.file_list = QListWidget()
-        self.file_list.setMaximumHeight(
-            140
-        )
-
-        control_layout.addWidget(self.file_list)
-
-        file_button_layout = QHBoxLayout()
-
-        self.select_button = QPushButton(
             "Select Participants"
         )
 
+        participant_label.setStyleSheet(
+            "font-weight: bold;"
+        )
+
+        control_layout.addWidget(
+            participant_label
+        )
+
+        # Scrollable participant checkbox area
+        self.participant_scroll = QScrollArea()
+        self.participant_scroll.setWidgetResizable(True)
+        self.participant_scroll.setMinimumHeight(300)
+        self.participant_scroll.setMaximumHeight(450)
+
+        self.participant_widget = QWidget()
+
+        self.participant_layout = QVBoxLayout(
+            self.participant_widget
+        )
+
+        self.participant_scroll.setWidget(
+            self.participant_widget
+        )
+
+        control_layout.addWidget(
+            self.participant_scroll
+        )
+
+        # Participant buttons
+        participant_button_layout = QHBoxLayout()
+
+        self.refresh_button = QPushButton(
+            "Refresh"
+        )
+
+        self.select_all_button = QPushButton(
+            "Select All"
+        )
+
         self.clear_button = QPushButton(
-            "Clear Selection"
+            "Clear All"
         )
 
-        file_button_layout.addWidget(
-            self.select_button
+        participant_button_layout.addWidget(
+            self.refresh_button
         )
 
-        file_button_layout.addWidget(
+        participant_button_layout.addWidget(
+            self.select_all_button
+        )
+
+        participant_button_layout.addWidget(
             self.clear_button
         )
 
         control_layout.addLayout(
-            file_button_layout
+            participant_button_layout
         )
 
         # -------------------------
@@ -927,8 +963,12 @@ class MSIAnalysisGUI(QWidget):
         # Button connections
         # -------------------------
 
-        self.select_button.clicked.connect(
-            self.select_participants
+        self.refresh_button.clicked.connect(
+            self.load_participants
+        )
+
+        self.select_all_button.clicked.connect(
+            self.select_all_participants
         )
 
         self.clear_button.clicked.connect(
@@ -958,35 +998,141 @@ class MSIAnalysisGUI(QWidget):
         self.pdf_report_button.clicked.connect(
             self.generate_report
         )
+
+        self.load_participants()
     # ==================================================
     # Select participants
     # ==================================================
 
-    def select_participants(self):
+    def load_participants(self):
+        """
+        Scan the Data folder for Participant_XXX folders
+        and create one checkbox per participant.
+        """
 
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Select Participant CSV Files",
-            "../Data",
-            "CSV Files (*.csv)"
-        )
+        # Remove old checkboxes
+        while self.participant_layout.count():
 
-        if not files:
-            return
+            item = self.participant_layout.takeAt(0)
 
-        self.selected_files = files
+            widget = item.widget()
 
-        self.file_list.clear()
+            if widget is not None:
+                widget.deleteLater()
 
-        for file in files:
+        self.participant_checkboxes = {}
+        self.selected_files = []
 
-            self.file_list.addItem(
-                os.path.basename(file)
+        # Make sure Data folder exists
+        if not os.path.isdir(self.data_root):
+            QMessageBox.warning(
+                self,
+                "Data Folder Not Found",
+                f"Could not find:\n\n{self.data_root}"
             )
 
-        self.status_label.setText(
-            f"{len(files)} participant(s) selected"
+            return
+
+        # Find Participant_XXX folders
+        participant_folders = sorted(
+            folder
+            for folder in os.listdir(self.data_root)
+            if folder.startswith("Participant_")
+            and os.path.isdir(
+                os.path.join(
+                    self.data_root,
+                    folder
+                )
+            )
         )
+
+        for folder_name in participant_folders:
+
+            participant_folder = os.path.join(
+                self.data_root,
+                folder_name
+            )
+
+            # Find trial-level data CSV files.
+            # Do NOT use demographic_data files.
+            data_files = sorted(
+                os.path.join(
+                    participant_folder,
+                    filename
+                )
+                for filename in os.listdir(
+                    participant_folder
+                )
+                if filename.startswith("data_")
+                and filename.endswith(".csv")
+            )
+
+            # Skip participant if there is no data CSV
+            if not data_files:
+                continue
+
+            # If more than one data file exists,
+            # use the newest one.
+            data_file = max(
+                data_files,
+                key=os.path.getmtime
+            )
+
+            participant_id = folder_name.replace(
+                "Participant_",
+                ""
+            )
+
+            checkbox = QCheckBox(
+                f"Participant {participant_id}"
+            )
+
+            checkbox.stateChanged.connect(
+                self.update_selected_participants
+            )
+
+            self.participant_layout.addWidget(
+                checkbox
+            )
+
+            self.participant_checkboxes[
+                participant_id
+            ] = {
+                "checkbox": checkbox,
+                "file": data_file
+            }
+
+        self.participant_layout.addStretch()
+
+        self.status_label.setText(
+            f"Found {len(self.participant_checkboxes)} participant(s)"
+        )
+
+    def update_selected_participants(self):
+
+        self.selected_files = []
+
+        for participant_id, info in (
+                self.participant_checkboxes.items()
+        ):
+
+            if info["checkbox"].isChecked():
+                self.selected_files.append(
+                    info["file"]
+                )
+
+        self.status_label.setText(
+            f"{len(self.selected_files)} participant(s) selected"
+        )
+
+    def select_all_participants(self):
+
+        for info in self.participant_checkboxes.values():
+            info["checkbox"].setChecked(
+                True
+            )
+
+        self.update_selected_participants()
 
     # ==================================================
     # Clear participants
@@ -994,9 +1140,12 @@ class MSIAnalysisGUI(QWidget):
 
     def clear_selection(self):
 
-        self.selected_files = []
+        for info in self.participant_checkboxes.values():
+            info["checkbox"].setChecked(
+                False
+            )
 
-        self.file_list.clear()
+        self.selected_files = []
 
         self.status_label.setText(
             "No participants selected"
@@ -1466,12 +1615,9 @@ class MSIAnalysisGUI(QWidget):
 
                 sj_ok = (
                         bool(row["SJ_Fit_OK"])
-                        and bool(
-                    row["SJ_Response_Range_OK"]
-                )
-                        and bool(
-                    row["SJ_Response_Bias_OK"]
-                )
+                        and bool(row["SJ_Response_Range_OK"])
+                        and bool(row["SJ_Response_Bias_OK"])
+                        and bool(row["SJ_Catch_OK"])
                 )
 
                 sj_status = (
@@ -1488,13 +1634,11 @@ class MSIAnalysisGUI(QWidget):
             if "TOJ_Fit_OK" in results.columns:
 
                 toj_ok = (
-                        bool(row["TOJ_Fit_OK"])
-                        and bool(
-                    row["TOJ_Response_Range_OK"]
-                )
-                        and bool(
-                    row["TOJ_Response_Bias_OK"]
-                )
+                    bool(row["TOJ_Fit_OK"])
+                    and bool(row["TOJ_Response_Range_OK"])
+                    and bool(row["TOJ_Response_Bias_OK"])
+                    and bool(row["TOJ_Catch_OK"])
+
                 )
 
                 toj_status = (
@@ -1649,14 +1793,41 @@ class MSIAnalysisGUI(QWidget):
                     else "FAIL"
                 )
 
+                catch_status = (
+                    "PASS"
+                    if bool(
+                        participant["SJ_Catch_OK"]
+                    )
+                    else "FAIL"
+                )
+
+                sj_overall_status = (
+                    "PASS"
+                    if (
+                            bool(participant["SJ_Fit_OK"])
+                            and bool(participant["SJ_Response_Range_OK"])
+                            and bool(participant["SJ_Response_Bias_OK"])
+                            and bool(participant["SJ_Catch_OK"])
+                    )
+                    else "REVIEW"
+                )
+
                 message = (
                     f"Participant {participant_id} - SJ QC\n\n"
+                    f"Overall SJ QC: {sj_overall_status}\n\n"
 
                     f"Fit quality: {fit_status}\n"
                     f"R²: {participant['SJ_R2']:.3f}\n\n"
 
                     f"Response range: {range_status}\n"
                     f"Response bias: {bias_status}\n\n"
+
+                    f"Catch trials: "
+                    f"{int(participant['SJ_Catch_Correct'])}/"
+                    f"{int(participant['SJ_Catch_Trials'])}\n"
+
+                    f"Catch trial QC: {catch_status}\n"
+                    f"Required: at least 8/10 correct\n\n"
 
                     f"Simultaneous responses: "
                     f"{participant['SJ_Simultaneous_Proportion'] * 100:.1f}%\n"
@@ -1711,14 +1882,41 @@ class MSIAnalysisGUI(QWidget):
                     else "FAIL"
                 )
 
+                catch_status = (
+                    "PASS"
+                    if bool(
+                        participant["TOJ_Catch_OK"]
+                    )
+                    else "FAIL"
+                )
+
+                toj_overall_status = (
+                    "PASS"
+                    if (
+                            bool(participant["TOJ_Fit_OK"])
+                            and bool(participant["TOJ_Response_Range_OK"])
+                            and bool(participant["TOJ_Response_Bias_OK"])
+                            and bool(participant["TOJ_Catch_OK"])
+                    )
+                    else "REVIEW"
+                )
+
                 message = (
                     f"Participant {participant_id} - TOJ QC\n\n"
+                    f"Overall TOJ QC: {toj_overall_status}\n\n"
 
                     f"Fit quality: {fit_status}\n"
                     f"R²: {participant['TOJ_R2']:.3f}\n\n"
 
                     f"Response range: {range_status}\n"
                     f"Response bias: {bias_status}\n\n"
+
+                    f"Catch trials: "
+                    f"{int(participant['TOJ_Catch_Correct'])}/"
+                    f"{int(participant['TOJ_Catch_Trials'])}\n"
+
+                    f"Catch trial QC: {catch_status}\n"
+                    f"Required: at least 8/10 correct\n\n"
 
                     f"Audio First: "
                     f"{participant['TOJ_Audio_First_Proportion'] * 100:.1f}%\n"

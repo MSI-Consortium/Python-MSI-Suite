@@ -127,14 +127,16 @@ def analyze_participant(
         qc_checks.extend([
             sj_results["SJ_Fit_OK"],
             sj_results["SJ_Response_Range_OK"],
-            sj_results["SJ_Response_Bias_OK"]
+            sj_results["SJ_Response_Bias_OK"],
+            sj_results["SJ_Catch_OK"]
         ])
 
     if run_toj:
         qc_checks.extend([
             toj_results["TOJ_Fit_OK"],
             toj_results["TOJ_Response_Range_OK"],
-            toj_results["TOJ_Response_Bias_OK"]
+            toj_results["TOJ_Response_Bias_OK"],
+            toj_results["TOJ_Catch_OK"]
         ])
 
     if run_srt:

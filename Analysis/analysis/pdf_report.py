@@ -194,6 +194,11 @@ def generate_pdf_report(
         ],
 
         [
+            "SJ / TOJ catch-trial criterion",
+            "At least 8 / 10 correct"
+        ],
+
+        [
             "Anticipation threshold",
             (
                 f"{qc_settings['min_rt_ms']} ms"
@@ -352,6 +357,16 @@ def generate_pdf_report(
             (
                 "Did the participant avoid extremely one-sided "
                 "responding outside the allowed response proportions?"
+            )
+        ],
+
+        [
+            "Catch Trials",
+            (
+                "Did the participant correctly identify at least 8 of the "
+                "10 easy 1000-ms catch trials in each SJ and TOJ task? "
+                "Catch trials are used as an attention/task-comprehension "
+                "quality check and are excluded from psychometric fitting."
             )
         ],
 
@@ -868,6 +883,8 @@ def generate_pdf_report(
             "SJ_Sigma_ms",
             "SJ_TBW_ms",
             "SJ_R2",
+            "SJ_Catch_Correct",
+            "SJ_Catch_OK",
             "SJ_Fit_OK",
             "SJ_Response_Range_OK",
             "SJ_Response_Bias_OK"
@@ -896,7 +913,13 @@ def generate_pdf_report(
                 "Range",
 
             "SJ_Response_Bias_OK":
-                "Bias"
+                "Bias",
+
+            "SJ_Catch_Correct":
+                "Catch /10",
+
+            "SJ_Catch_OK":
+                "Catch QC",
         }
     )
 
@@ -913,6 +936,8 @@ def generate_pdf_report(
             "TOJ_Slope",
             "TOJ_JND_ms",
             "TOJ_R2",
+            "TOJ_Catch_Correct",
+            "TOJ_Catch_OK",
             "TOJ_Fit_OK",
             "TOJ_Response_Range_OK",
             "TOJ_Response_Bias_OK"
@@ -941,7 +966,13 @@ def generate_pdf_report(
                 "Range",
 
             "TOJ_Response_Bias_OK":
-                "Bias"
+                "Bias",
+
+            "TOJ_Catch_Correct":
+                "Catch /10",
+
+            "TOJ_Catch_OK":
+                "Catch QC",
         }
     )
 
@@ -1198,7 +1229,8 @@ def generate_pdf_report(
                 "Measure 2",
                 "Measure 3",
                 "R² / CV",
-                "QC"
+                "Catch",
+                "Fit QC"
             ]
         ]
 
@@ -1245,6 +1277,18 @@ def generate_pdf_report(
                         "SJ_R2",
                         decimals=3
                     )
+                ),
+                (
+                        format_value(
+                            row,
+                            "SJ_Catch_Correct",
+                            decimals=0
+                        )
+                        + "/10 "
+                        + qc_status(
+                    row,
+                    "SJ_Catch_OK"
+                )
                 ),
 
                 qc_status(
@@ -1295,6 +1339,18 @@ def generate_pdf_report(
                         "TOJ_R2",
                         decimals=3
                     )
+                ),
+                (
+                        format_value(
+                            row,
+                            "TOJ_Catch_Correct",
+                            decimals=0
+                        )
+                        + "/10 "
+                        + qc_status(
+                    row,
+                    "TOJ_Catch_OK"
+                )
                 ),
 
                 qc_status(
@@ -1358,12 +1414,13 @@ def generate_pdf_report(
             participant_results_data,
 
             colWidths=[
-                0.55 * inch,
-                1.75 * inch,
-                1.75 * inch,
-                1.75 * inch,
-                1.25 * inch,
-                0.80 * inch
+                0.50 * inch,  # Task
+                1.55 * inch,  # Measure 1
+                1.55 * inch,  # Measure 2
+                1.55 * inch,  # Measure 3
+                1.10 * inch,  # R2 / CV
+                1.20 * inch,  # Catch
+                0.75 * inch  # QC
             ]
         )
 

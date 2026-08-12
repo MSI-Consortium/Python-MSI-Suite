@@ -1,12 +1,14 @@
 import sys
 import json
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QMessageBox, 
-                             QLabel, QLineEdit, QSpinBox, QComboBox, QGroupBox, QFormLayout, QCheckBox, QScrollArea, QDoubleSpinBox)
+from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QMessageBox,
+                             QLabel, QLineEdit, QSpinBox, QComboBox, QGroupBox, QFormLayout, QCheckBox, QScrollArea,
+                             QDoubleSpinBox)
 import os
 import subprocess
 import redcap
 from typing import List
 import copy
+
 
 class BlockConfig(QGroupBox):
     def __init__(self, block_number):
@@ -61,10 +63,10 @@ class BlockConfig(QGroupBox):
             # plus an equal number of synchronous (0-ms) trials
             asynchronous_trials = num_nonzero_soas * trials_per_condition
             synchronous_trials = asynchronous_trials
-            total_trials = asynchronous_trials + synchronous_trials
+            total_trials = asynchronous_trials + synchronous_trials + 10  # includes 10 catch trials at +/-1000 ms
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
         elif exp_type == 'TOJ':
-            total_trials = trials_per_condition * 13  # 13 SOA conditions
+            total_trials = trials_per_condition * 13 + 10  # plus 10 catch trials at +/-1000 ms
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
         elif exp_type == 'SRT':
             total_trials = trials_per_condition * 3  # 3 conditions
@@ -80,7 +82,7 @@ class BlockConfig(QGroupBox):
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
 
         self.total_trials_label.setText(f'Total trials: {total_trials}')
-        self.time_estimate_label.setText(f'Estimated time: {estimated_time/60:.1f} min')
+        self.time_estimate_label.setText(f'Estimated time: {estimated_time / 60:.1f} min')
 
     def get_config(self):
         config = {
@@ -97,72 +99,73 @@ class BlockConfig(QGroupBox):
 
         return config
 
+
 class ExperimentConfigApp(QWidget):
     def update_participant_ids(self):
         """Update participant ID combo box with existing records and next available ID."""
         try:
             existing_ids = self.fetch_redcap_records()
-            
+
             # Clear current items
             self.participant_id.clear()
-            
+
             # Format existing IDs with leading zeros
             formatted_ids = [str(int(id)).zfill(3) for id in existing_ids]
-            
+
             # Add formatted existing IDs
             self.participant_id.addItems(formatted_ids)
-            
+
             # Calculate and add next available ID with leading zeros
             if existing_ids:
                 next_id = str(int(max(existing_ids)) + 1).zfill(3)
             else:
                 next_id = "001"
-                
+
             self.participant_id.addItem(next_id)
             self.participant_id.setCurrentText(next_id)
-            
+
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to update participant IDs: {str(e)}")
-    
+
     def __init__(self):
         super().__init__()
         self.blocks = []
         self.last_saved_file = None
         self.original_config = None  # Store the original config for change detection
         self.has_unsaved_changes = False  # Track whether changes have been made
-        
+
         self.initUI()
         self.load_default_config()
         self.load_api_credentials()
-        
+
         # Connect API credential changes to participant ID update
         self.api_url.textChanged.connect(self.update_participant_ids)
         self.api_token.textChanged.connect(self.update_participant_ids)
-        
+
         # Connect change tracking to all input widgets
         self.connect_change_tracking()
 
     def initUI(self):
         self.setWindowTitle('Multi-Block Experiment Configuration')
         self.setGeometry(100, 100, 800, 800)
-        
+
         main_layout = QVBoxLayout()
-    
+
         # Create participant group
         participant_group = QGroupBox('Participant Information')
         participant_layout = QFormLayout()
-    
+
         # Participant ID setup
         self.participant_id = QComboBox()
         self.participant_id.setEditable(True)
         self.participant_id.setInsertPolicy(QComboBox.InsertPolicy.InsertAlphabetically)
         self.refresh_participant_id_button = QPushButton("Refresh IDs")
         self.refresh_participant_id_button.clicked.connect(self.update_participant_ids)
-    
+
         participant_id_layout = QHBoxLayout()
         participant_id_layout.addWidget(self.participant_id)
         participant_id_layout.addWidget(self.refresh_participant_id_button)
-    
+
         # Other participant fields
         self.age = QSpinBox()
         self.age.setRange(4, 100)
@@ -170,24 +173,24 @@ class ExperimentConfigApp(QWidget):
         self.gender.addItems(['m', 'f'])
         self.site = QComboBox()
         self.site.addItems(['vandy', 'yale', 'iit', 'chuv'])
-    
+
         # Add fullscreen checkbox after site selection
         self.fullscreen = QCheckBox('Fullscreen Mode')
         participant_layout.addRow('Fullscreen:', self.fullscreen)
-        
+
         # Add test mode checkbox for SJ tasks
         self.test_mode = QCheckBox('Test Mode (show SOA values)')
         participant_layout.addRow('Test Mode:', self.test_mode)
-        
+
         # Add offline mode checkbox
         self.offline_mode = QCheckBox('Offline Mode (no REDCap connection required)')
         participant_layout.addRow('Offline Mode:', self.offline_mode)
-        
+
         # API URL and Token input fields
         self.api_url = QLineEdit()
         self.api_token = QLineEdit()
         self.api_token.setEchoMode(QLineEdit.Password)  # Hide API token for security
-    
+
         # Add widgets to participant layout
         participant_layout.addRow('Participant ID:', participant_id_layout)
         participant_layout.addRow('Age:', self.age)
@@ -195,7 +198,7 @@ class ExperimentConfigApp(QWidget):
         participant_layout.addRow('Site:', self.site)
         participant_layout.addRow('API URL:', self.api_url)
         participant_layout.addRow('API Token:', self.api_token)
-        
+
         participant_group.setLayout(participant_layout)
         main_layout.addWidget(participant_group)
 
@@ -319,10 +322,66 @@ class ExperimentConfigApp(QWidget):
         self.srt_response_window.setToolTip("Maximum time to wait for a response in SRT tasks")
         testing_layout.addRow('Response Window (SRT):', self.srt_response_window)
 
+        # Finish Testing Parameters group FIRST
         testing_group.setLayout(testing_layout)
         main_layout.addWidget(testing_group)
 
-        # Blocks area
+        # =========================================================
+        # BETWEEN-TASK VIDEOS
+        # =========================================================
+        video_group = QGroupBox('Between-Task Videos')
+        video_layout = QFormLayout()
+
+        # Break Video 1
+        self.between_task_video_1 = QLineEdit()
+        self.between_task_video_1.setReadOnly(True)
+        self.between_task_video_1.setPlaceholderText("No video selected")
+
+        self.video_browse_button_1 = QPushButton("Browse...")
+        self.video_browse_button_1.clicked.connect(
+            lambda: self.select_between_task_video(1)
+        )
+
+        video_1_layout = QHBoxLayout()
+        video_1_layout.addWidget(self.between_task_video_1)
+        video_1_layout.addWidget(self.video_browse_button_1)
+
+        video_layout.addRow('Break Video 1:', video_1_layout)
+
+        # Break Video 2
+        self.between_task_video_2 = QLineEdit()
+        self.between_task_video_2.setReadOnly(True)
+        self.between_task_video_2.setPlaceholderText("No video selected")
+
+        self.video_browse_button_2 = QPushButton("Browse...")
+        self.video_browse_button_2.clicked.connect(
+            lambda: self.select_between_task_video(2)
+        )
+
+        video_2_layout = QHBoxLayout()
+        video_2_layout.addWidget(self.between_task_video_2)
+        video_2_layout.addWidget(self.video_browse_button_2)
+
+        video_layout.addRow('Break Video 2:', video_2_layout)
+
+        video_explanation = QLabel(
+            "Break Video 1 plays after the first task transition. "
+            "Break Video 2 plays after the second task transition."
+        )
+        video_explanation.setWordWrap(True)
+        video_explanation.setStyleSheet(
+            "color: gray; font-size: 10px;"
+        )
+
+        video_layout.addRow(video_explanation)
+
+        video_group.setLayout(video_layout)
+        main_layout.addWidget(video_group)
+
+        # =========================================================
+        # BLOCKS AREA
+        # =========================================================
+
         self.blocks_scroll = QScrollArea()
         self.blocks_scroll.setWidgetResizable(True)
         self.blocks_widget = QWidget()
@@ -350,23 +409,41 @@ class ExperimentConfigApp(QWidget):
 
         # Load, Save and Run buttons
         load_save_run_layout = QHBoxLayout()
-        
+
         self.load_button = QPushButton('Load Configuration')
         self.load_button.clicked.connect(self.load_config_file)
         load_save_run_layout.addWidget(self.load_button)
-        
+
         self.save_button = QPushButton('Save Configuration')
         self.save_button.clicked.connect(self.save_config)
         load_save_run_layout.addWidget(self.save_button)
-        
+
         self.run_button = QPushButton('Save and Run Experiment')
         self.run_button.clicked.connect(self.save_and_run)
         load_save_run_layout.addWidget(self.run_button)
-        
+
         main_layout.addLayout(load_save_run_layout)
 
         self.setLayout(main_layout)
         self.add_block()  # Start with one block
+
+    def select_between_task_video(self, video_number):
+        """Select a local video for a specific between-task break."""
+
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            f'Select Break Video {video_number}',
+            '',
+            'Video Files (*.mp4 *.mov *.avi *.mkv *.webm);;All Files (*)'
+        )
+
+        if filename:
+            if video_number == 1:
+                self.between_task_video_1.setText(filename)
+            elif video_number == 2:
+                self.between_task_video_2.setText(filename)
+
+            self.mark_as_changed()
 
     def connect_change_tracking(self):
         """Connect change tracking signals to all UI elements"""
@@ -396,7 +473,7 @@ class ExperimentConfigApp(QWidget):
         """Mark the configuration as having unsaved changes"""
         self.has_unsaved_changes = True
         self.update_status_label()
-    
+
     def update_status_label(self):
         """Update the status label to reflect current change state"""
         if self.has_unsaved_changes:
@@ -409,7 +486,7 @@ class ExperimentConfigApp(QWidget):
         try:
             if not self.api_url.text() or not self.api_token.text():
                 return []
-            
+
             project = redcap.Project(self.api_url.text(), self.api_token.text())
             records = project.export_records(fields=['record_id'])
             record_ids = [str(record['record_id']) for record in records]
@@ -417,7 +494,7 @@ class ExperimentConfigApp(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "REDCap Connection Error", f"Could not fetch records: {str(e)}")
             return []
-    
+
     def load_default_config(self):
         default_file = 'default.json'
         if os.path.exists(default_file):
@@ -428,16 +505,16 @@ class ExperimentConfigApp(QWidget):
     def load_config_file(self):
         # Check for unsaved changes before loading a new config
         if self.has_unsaved_changes:
-            reply = QMessageBox.question(self, 'Unsaved Changes', 
-                                      'You have unsaved changes. Do you want to save them first?',
-                                      QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
-            
+            reply = QMessageBox.question(self, 'Unsaved Changes',
+                                         'You have unsaved changes. Do you want to save them first?',
+                                         QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+
             if reply == QMessageBox.Yes:
                 if not self.save_config():
                     return  # User canceled save operation
             elif reply == QMessageBox.Cancel:
                 return  # User canceled the load operation
-        
+
         filename, _ = QFileDialog.getOpenFileName(self, 'Load Config', '', 'JSON Files (*.json)')
         if filename:
             self.load_config_from_file(filename)
@@ -446,20 +523,20 @@ class ExperimentConfigApp(QWidget):
         try:
             with open(filename, 'r') as f:
                 config = json.load(f)
-            
+
             # Store a deep copy of the original config for change comparison
             self.original_config = copy.deepcopy(config)
-            
+
             self.load_config(config)
             QMessageBox.information(self, "Configuration Loaded", f"Configuration loaded from {filename}")
-            
+
             if set_last_saved_file:
                 self.last_saved_file = filename
-            
+
             # Reset change tracking after loading
             self.has_unsaved_changes = False
             self.update_status_label()
-            
+
         except json.JSONDecodeError:
             QMessageBox.warning(self, "Error", "Invalid JSON file. Please select a valid configuration file.")
         except Exception as e:
@@ -474,7 +551,7 @@ class ExperimentConfigApp(QWidget):
         self.fullscreen.setChecked(config.get('fullscreen', False))  # Load fullscreen setting
         self.test_mode.setChecked(config.get('test_mode', False))  # Load test mode setting
         self.offline_mode.setChecked(config.get('offline_mode', False))  # Load offline mode setting
-    
+
         # Set audiovisual synchrony correction value
         self.av_sync_correction.setValue(config.get('av_sync_correction', 0.0))
 
@@ -489,40 +566,51 @@ class ExperimentConfigApp(QWidget):
         self.max_response_time.setValue(config.get('max_response_time', 0.0) or 0.0)
         self.srt_response_window.setValue(config.get('srt_response_window', 2.0))
 
+        # Load between-task videos
+        saved_videos = config.get('between_task_videos', [])
+
+        self.between_task_video_1.setText(
+            saved_videos[0] if len(saved_videos) > 0 else ''
+        )
+
+        self.between_task_video_2.setText(
+            saved_videos[1] if len(saved_videos) > 1 else ''
+        )
+
         # Clear existing blocks
         for block in self.blocks:
             block.setParent(None)
             block.deleteLater()
         self.blocks.clear()
-    
+
         # Add blocks from config
         for block_config in config.get('blocks', []):
             self.add_block(block_config)
-    
+
         self.update_total_time()
 
     def add_block(self, block_config=None):
         block = BlockConfig(len(self.blocks) + 1)
         block.trials_per_condition.valueChanged.connect(self.update_total_time)
         block.exp_type.currentTextChanged.connect(self.update_total_time)
-        
+
         # Connect change tracking to block widgets
         block.trials_per_condition.valueChanged.connect(self.mark_as_changed)
         block.exp_type.currentTextChanged.connect(self.mark_as_changed)
         block.left_audio_high.stateChanged.connect(self.mark_as_changed)
         block.left_visual_green.stateChanged.connect(self.mark_as_changed)
-        
+
         if block_config:
             block.exp_type.setCurrentText(block_config.get('experiment', 'SJ'))
             block.trials_per_condition.setValue(block_config.get('trials_per_condition', 1))
             if block_config.get('experiment') == 'SRT_Mod':
                 block.left_audio_high.setChecked(block_config.get('left_audio_high', False))
                 block.left_visual_green.setChecked(block_config.get('left_visual_green', False))
-        
+
         self.blocks.append(block)
         self.blocks_layout.addWidget(block)
         self.update_total_time()
-        
+
         # Mark as changed if this was a user-initiated block addition (not from loading)
         if not block_config:
             self.mark_as_changed()
@@ -559,22 +647,26 @@ class ExperimentConfigApp(QWidget):
             'srt_iti_max': self.srt_iti_max.value(),
             'max_response_time': self.max_response_time.value() if self.max_response_time.value() > 0 else None,
             'srt_response_window': self.srt_response_window.value(),
+            'between_task_videos': [
+                self.between_task_video_1.text(),
+                self.between_task_video_2.text()
+            ],
             'blocks': [block.get_config() for block in self.blocks],
             'total_estimated_time': float(self.total_time_label.text().split(': ')[1].split(' ')[0])
         }
         return config
-    
+
     def config_has_changed(self):
         """Compare current config with original loaded config to detect changes"""
         if self.original_config is None:
             return self.has_unsaved_changes
-        
+
         current_config = self.get_current_config()
-        
+
         # Remove API credential fields from comparison since they're saved separately
         current_copy = copy.deepcopy(current_config)
         original_copy = copy.deepcopy(self.original_config)
-        
+
         if 'api_url' in current_copy:
             del current_copy['api_url']
         if 'api_token' in current_copy:
@@ -583,9 +675,9 @@ class ExperimentConfigApp(QWidget):
             del original_copy['api_url']
         if 'api_token' in original_copy:
             del original_copy['api_token']
-        
+
         return current_copy != original_copy
-    
+
     def load_api_credentials(self, filename="api_text.txt"):
         """Load API URL and token from file, or prompt user if file is missing or values are invalid."""
         if os.path.exists(filename):
@@ -599,9 +691,9 @@ class ExperimentConfigApp(QWidget):
             # Update participant IDs after loading credentials
             self.update_participant_ids()
         else:
-            QMessageBox.information(self, "Enter API Credentials", 
-                                "API credentials not found. Please enter the API URL and Token in the fields provided.")
-    
+            QMessageBox.information(self, "Enter API Credentials",
+                                    "API credentials not found. Please enter the API URL and Token in the fields provided.")
+
     def save_api_credentials(self, filename="api_text.txt"):
         """Save API URL and token to file."""
         with open(filename, 'w') as file:
@@ -610,14 +702,14 @@ class ExperimentConfigApp(QWidget):
 
     def save_config(self):
         config = self.get_current_config()
-        
+
         # If we have a last_saved_file and no changes, no need to save again
         if self.last_saved_file and not self.has_unsaved_changes and not self.config_has_changed():
             return self.last_saved_file
-        
+
         # If config has been modified, suggest saving with a new name
         suggest_new_filename = self.last_saved_file and self.config_has_changed()
-        
+
         if suggest_new_filename:
             msg = QMessageBox()
             msg.setIcon(QMessageBox.Question)
@@ -629,7 +721,7 @@ class ExperimentConfigApp(QWidget):
             cancel_btn = msg.addButton(QMessageBox.Cancel)
             msg.setDefaultButton(save_new_btn)
             msg.exec_()
-            
+
             if msg.clickedButton() == save_new_btn:
                 # User chose to save as new file - continue to file dialog
                 pass
@@ -647,12 +739,12 @@ class ExperimentConfigApp(QWidget):
             else:
                 # User canceled
                 return None
-        
+
         # Default save dialog
         suggested_name = ''
         if self.last_saved_file and not suggest_new_filename:
             suggested_name = self.last_saved_file
-            
+
         filename, _ = QFileDialog.getSaveFileName(self, 'Save Config', suggested_name, 'JSON Files (*.json)')
         if filename:
             with open(filename, 'w') as f:
@@ -667,28 +759,103 @@ class ExperimentConfigApp(QWidget):
         else:
             return None
 
+    def validate_between_task_video(self):
+        """
+        Verify that enough valid videos have been selected for
+        all transitions between different tasks.
+        """
+
+        experiment_types = [
+            block.exp_type.currentText().lower()
+            for block in self.blocks
+        ]
+
+        # Count actual transitions between different tasks
+        transition_count = sum(
+            experiment_types[i] != experiment_types[i + 1]
+            for i in range(len(experiment_types) - 1)
+        )
+
+        # No task transitions = no videos needed
+        if transition_count == 0:
+            return True
+
+        video_paths = [
+            self.between_task_video_1.text().strip(),
+            self.between_task_video_2.text().strip()
+        ]
+
+        valid_extensions = (
+            '.mp4',
+            '.mov',
+            '.avi',
+            '.mkv',
+            '.webm'
+        )
+
+        # Validate only the videos actually needed
+        for i in range(transition_count):
+
+            if i >= len(video_paths) or not video_paths[i]:
+                QMessageBox.warning(
+                    self,
+                    "Between-Task Video Required",
+                    f"Break Video {i + 1} has not been selected.\n\n"
+                    "Please select a video before starting the experiment."
+                )
+                return False
+
+            video_path = video_paths[i]
+
+            if not os.path.isfile(video_path):
+                QMessageBox.warning(
+                    self,
+                    "Video File Not Found",
+                    f"Break Video {i + 1} could not be found:\n\n"
+                    f"{video_path}\n\n"
+                    "Please select the video again."
+                )
+                return False
+
+            if not video_path.lower().endswith(valid_extensions):
+                QMessageBox.warning(
+                    self,
+                    "Unsupported Video File",
+                    f"Break Video {i + 1} is not a supported video format."
+                )
+                return False
+
+        return True
 
     def save_and_run(self):
+        # ---------------------------------------------------------
+        # Validate between-task video before starting experiment
+        # ---------------------------------------------------------
+        if not self.validate_between_task_video():
+            return
+
         # First, check if there are unsaved changes
         if self.has_unsaved_changes or self.config_has_changed():
             filename = self.save_config()
             if not filename:
                 # User cancelled save, do not proceed
-                QMessageBox.warning(self, "Save Configuration", "You must save the configuration before running the experiment.")
+                QMessageBox.warning(self, "Save Configuration",
+                                    "You must save the configuration before running the experiment.")
                 return  # Exit the method without running the experiment
-                
+
             self.last_saved_file = filename
         elif not self.last_saved_file:
             # No last saved file but no changes either - need to save first
             filename = self.save_config()
             if not filename:
-                QMessageBox.warning(self, "Save Configuration", "You must save the configuration before running the experiment.")
+                QMessageBox.warning(self, "Save Configuration",
+                                    "You must save the configuration before running the experiment.")
                 return
-                
+
             self.last_saved_file = filename
 
         # Now we have a valid saved file that matches the current configuration
-        
+
         # Proceed to run the experiment
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Information)
@@ -704,6 +871,7 @@ class ExperimentConfigApp(QWidget):
 
         # Close the configuration app
         self.close()
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

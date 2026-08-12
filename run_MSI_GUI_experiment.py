@@ -24,6 +24,27 @@ prefs.hardware['audioDevice'] = 'Headphones (Realtek(R) Audio)'
 from psychopy import sound
 
 
+# =========================================================
+# DATA STORAGE
+# =========================================================
+
+DATA_ROOT = r"C:\Users\multi\OneDrive\Documents\github\Python-MSI-Suite\Data"
+
+
+def get_participant_folder(participant_id):
+    participant_id = str(participant_id).zfill(3)
+
+    participant_folder = os.path.join(
+        DATA_ROOT,
+        f"Participant_{participant_id}"
+    )
+
+    os.makedirs(
+        participant_folder,
+        exist_ok=True
+    )
+
+    return participant_folder
 
 
 def get_audio_lib_name():
@@ -32,6 +53,7 @@ def get_audio_lib_name():
         return sound.audioLib
     except AttributeError:
         return prefs.hardware['audioLib']
+
 
 print("\nAudio Configuration:")
 print(f"Selected Audio Library: {get_audio_lib_name()}")
@@ -52,84 +74,87 @@ import subprocess  # Add this import at the top
 PTB_AVAILABLE = False
 try:
     import psychtoolbox as ptb
+
     PTB_AVAILABLE = True
     print("PTB prescheduling: Available (sub-ms precision)")
 except ImportError:
     print("PTB prescheduling: Not available (using callOnFlip fallback ~5ms precision)")
 
+
 def load_config(config_file):
     with open(config_file, 'r') as f:
         return json.load(f)
 
+
 def check_and_upload_offline_files(api_url, api_token):
     """Check for offline data files and upload them to REDCap if online.
-    
+
     Fetches the latest record ID from REDCap and ensures offline files
     are correctly numbered before upload.
     """
     try:
         print("\nChecking for offline data files...")
         offline_files = []
-        
+
         # Find all data files with 'offline' in the filename
         for file in os.listdir():
             if file.startswith('data_') and file.endswith('.csv') and 'offline' in file:
                 offline_files.append(file)
-                
+
         # Also find offline demographic files
         for file in os.listdir():
             if file.startswith('demographic_data_') and file.endswith('.csv') and 'offline' in file:
                 offline_files.append(file)
-        
+
         if not offline_files:
             print("No offline files found.")
             return
-            
+
         print(f"Found {len(offline_files)} offline files.")
-        
+
         # Try to connect to REDCap and get the latest record ID
         try:
             project = redcap.Project(api_url, api_token)
             print("Connected to REDCap project for offline file upload.")
-            
+
             # Get all existing record IDs to find the highest one
             try:
                 records = project.export_records(fields=['record_id'])
                 record_ids = [int(record['record_id']) for record in records if record['record_id'].isdigit()]
-                
+
                 if record_ids:
                     next_id = max(record_ids) + 1
                 else:
                     next_id = 1
-                    
+
                 print(f"Next available REDCap record ID: {next_id}")
-                
-                # Group files by participant to ensure data and demographic files for the same 
+
+                # Group files by participant to ensure data and demographic files for the same
                 # participant get the same new ID
                 participant_files = {}
-                
+
                 for file in offline_files:
                     parts = file.split('_')
                     if file.startswith('data_'):
                         participant_id = parts[1]
                     else:  # demographic file
                         participant_id = parts[2]
-                    
+
                     if participant_id not in participant_files:
                         participant_files[participant_id] = []
-                    
+
                     participant_files[participant_id].append(file)
-                
+
                 # Process files in batches by participant, assigning new sequential IDs
                 for offline_id, files in participant_files.items():
                     new_id_str = str(next_id).zfill(3)  # Format with leading zeros
                     print(f"Assigning ID {new_id_str} to offline participant {offline_id}")
-                    
+
                     for file in files:
                         # Prepare the record and upload
                         record_data = [{'record_id': new_id_str}]
                         project.import_records(record_data)
-                        
+
                         # Create new filename before upload
                         if file.startswith('data_'):
                             # Format: data_ID_age_gender_site_offline_timestamp.csv
@@ -144,39 +169,39 @@ def check_and_upload_offline_files(api_url, api_token):
                             parts = file.split('_')
                             timestamp = parts[-1]  # Get timestamp
                             new_filename = f"demographic_data_{new_id_str}_{timestamp}"
-                        
+
                         print(f"Renaming {file} to {new_filename} for upload")
-                        
+
                         # Determine the field name for upload
                         if file.startswith('data_'):
                             field_name = 'python_data_file'
                         else:
                             field_name = 'demographic_data_file'
-                        
+
                         # Upload file with the new ID
                         try:
                             with open(file, 'rb') as f:
                                 file_content = f.read()
-                                
+
                                 # For data files, we need to update the participant ID inside the CSV content
                                 if file.startswith('data_'):
                                     # Read the file, update the participant ID in the content
                                     with open(file, 'r') as csv_file:
                                         lines = csv_file.readlines()
-                                        
+
                                     header = lines[0]
                                     updated_lines = [header]
-                                    
+
                                     # Update each data row with the new participant ID
                                     for line in lines[1:]:
                                         data = line.split(',')
                                         data[0] = new_id_str  # Replace participant ID
                                         updated_lines.append(','.join(data))
-                                    
+
                                     # Write updated content to the new file
                                     with open(new_filename, 'w') as new_file:
                                         new_file.writelines(updated_lines)
-                                        
+
                                     # Now read the updated file for upload
                                     with open(new_filename, 'rb') as new_file:
                                         file_content = new_file.read()
@@ -184,20 +209,20 @@ def check_and_upload_offline_files(api_url, api_token):
                                     # Simply rename the demographic file and update its content
                                     with open(file, 'r') as csv_file:
                                         lines = csv_file.readlines()
-                                        
+
                                     header = lines[0]
                                     # There should be only one data row in demographic files
                                     if len(lines) > 1:
                                         data = lines[1].split(',')
                                         data[0] = new_id_str  # Replace participant ID
                                         updated_content = header + ','.join(data)
-                                        
+
                                         with open(new_filename, 'w') as new_file:
                                             new_file.write(updated_content)
-                                            
+
                                         with open(new_filename, 'rb') as new_file:
                                             file_content = new_file.read()
-                            
+
                             # Upload the file with the new name and ID
                             project.import_file(
                                 record=new_id_str,
@@ -205,34 +230,35 @@ def check_and_upload_offline_files(api_url, api_token):
                                 file_name=new_filename,
                                 file_content=file_content
                             )
-                            
+
                             print(f"Successfully uploaded {new_filename} to REDCap with ID {new_id_str}")
-                            
+
                             # Delete the original offline file since we've created a renamed version
                             if os.path.exists(file):
                                 os.remove(file)
                                 print(f"Removed original offline file: {file}")
-                                
+
                         except Exception as e:
                             print(f"Error processing {file}: {str(e)}")
                             continue
-                    
+
                     # Increment the ID for the next participant
                     next_id += 1
-                    
+
             except Exception as e:
                 print(f"Error fetching REDCap records: {str(e)}")
                 return
-                    
+
         except Exception as e:
             print(f"Error connecting to REDCap: {str(e)}")
             return
-            
+
     except Exception as e:
         print(f"Error checking for offline files: {str(e)}")
         import traceback
         print(traceback.format_exc())
         return
+
 
 def load_api_credentials(filename="api_text.txt"):
     """Load API URL and token from file. Returns None if not found or incomplete."""
@@ -256,6 +282,7 @@ def load_api_credentials(filename="api_text.txt"):
 
     return api_url, api_token
 
+
 # Load API credentials
 api_url, api_token = load_api_credentials()
 
@@ -272,7 +299,7 @@ if api_url and api_token and not offline_mode:
         print("\nVerifying REDCap connection...")
         project_info = project.export_project_info()
         print(f"Connected to REDCap project: {project_info['project_title']}")
-        
+
         # Check for offline files and upload them
         check_and_upload_offline_files(api_url, api_token)
     except Exception as e:
@@ -289,10 +316,12 @@ else:
 RUNNING_ON_MAC = platform.system() == 'Darwin'
 print(f"Running on {'Mac' if RUNNING_ON_MAC else 'Windows/Linux'}")
 
-# OS-specific settings
+# Use fullscreen setting selected in the configuration GUI
+USE_FULLSCREEN = config.get('fullscreen', False)
+
 if RUNNING_ON_MAC:
     WINDOW_CONFIG = {
-        'fullscr': False,
+        'fullscr': USE_FULLSCREEN,
         'waitBlanking': True,
         'allowGUI': True,
         'screen': 0,
@@ -301,43 +330,61 @@ if RUNNING_ON_MAC:
     }
 else:
     WINDOW_CONFIG = {
-        'fullscr': False,
+        'fullscr': USE_FULLSCREEN,
         'waitBlanking': True,
         'allowGUI': True,
         'screen': 0
     }
 
-
+print(f"Fullscreen mode: {'ON' if USE_FULLSCREEN else 'OFF'}")
 
 
 def save_demographic_data(config):
-    """Save demographic data to CSV and create REDCap record if possible."""
-    # Generate filename with timestamp
+    """Save demographic data inside the participant's Data folder."""
+
     timestamp = datetime.now().strftime("%Y%m%d")
-    
-    # Add offline tag to filename if in offline mode
+
     offline_mode = config.get('offline_mode', False)
     offline_tag = "_offline" if offline_mode else ""
-    demo_filename = f"demographic_data_{config['participant_id']}{offline_tag}_{timestamp}.csv"
-    
-    # Save demographic data to CSV
+
+    participant_id = str(config['participant_id']).zfill(3)
+
+    participant_folder = get_participant_folder(
+        participant_id
+    )
+
+    demo_filename = os.path.join(
+        participant_folder,
+        f"demographic_data_{participant_id}{offline_tag}_{timestamp}.csv"
+    )
+
     with open(demo_filename, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['record_id', 'age', 'gender'])
-        writer.writerow([config['participant_id'], config['age'], config['gender']])
-    
+
+        writer.writerow([
+            'record_id',
+            'age',
+            'gender'
+        ])
+
+        writer.writerow([
+            participant_id,
+            config['age'],
+            config['gender']
+        ])
+
     # Skip REDCap upload if in offline mode
     if offline_mode:
         print("Running in offline mode. Demographic data saved locally.")
         return demo_filename
-    
+
     if project:
         try:
             # First create/update just the record_id
             data = {
                 'record_id': config['participant_id']
             }
-            
+
             # Import just the record_id
             project.import_records([data])
             print(f"Created/Updated record for participant: {config['participant_id']}")
@@ -364,10 +411,10 @@ def save_demographic_data(config):
 
     return demo_filename
 
+
 # Config already loaded above (before REDCap init)
 demographic_file = save_demographic_data(config)
 print(f"Demographic data saved to: {demographic_file}")
-
 
 # Common parameters
 bg_color = [255, 255, 255]  # White
@@ -382,6 +429,7 @@ mon = monitors.Monitor('testMonitor')
 mon.setWidth(32)
 mon.setDistance(distance)
 mon.setSizePix((win_width, win_height))
+
 
 # Robust timing functions (must be defined before use)
 def get_reliable_framerate(win, fallback_fps=60.0):
@@ -448,6 +496,7 @@ def get_reliable_framerate(win, fallback_fps=60.0):
     print("     and consider hardcoding it if detection consistently fails.")
     return fallback_fps
 
+
 def schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
     """
     Schedule a sound to play at a precise time using PTB prescheduling.
@@ -492,46 +541,49 @@ def schedule_sound_at_flip(win, sound_stim, delay_seconds=0.0):
         print(f"PTB prescheduling failed: {e}, using callOnFlip fallback")
         return False
 
+
 def wait_precise_duration(duration_ms, timing_clock=None):
     """
     Wait for a precise duration using time-based method instead of frames.
-    
+
     Parameters:
     -----------
     duration_ms : float
         Duration to wait in milliseconds
     timing_clock : core.Clock, optional
         Clock to use for timing measurements
-        
+
     Returns:
     --------
     float : actual duration waited
     """
     if timing_clock is None:
         timing_clock = core.Clock()
-    
+
     target_duration = duration_ms / 1000.0
     start_time = timing_clock.getTime()
-    
+
     # Use core.wait for precise timing
     core.wait(target_duration)
-    
+
     actual_duration = timing_clock.getTime() - start_time
-    
+
     # Log timing accuracy
     error = abs(actual_duration - target_duration)
     if error > 0.005:  # 5ms tolerance
-        print(f"Timing warning: requested {target_duration*1000:.1f}ms, got {actual_duration*1000:.1f}ms (error: {error*1000:.1f}ms)")
-    
+        print(
+            f"Timing warning: requested {target_duration * 1000:.1f}ms, got {actual_duration * 1000:.1f}ms (error: {error * 1000:.1f}ms)")
+
     return actual_duration
+
 
 def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_stims=None, timing_clock=None):
     """
     Present visual stimulus using hybrid timing (frames + time verification).
-    
-    This combines frame-based presentation for smoothness with time-based 
+
+    This combines frame-based presentation for smoothness with time-based
     verification for accuracy, and doesn't rely solely on framerate.
-    
+
     Parameters:
     -----------
     visual_stim : visual stimulus object
@@ -542,7 +594,7 @@ def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_sti
         Additional stimuli to draw
     timing_clock : core.Clock, optional
         Clock for timing measurements
-        
+
     Returns:
     --------
     float : actual presentation duration in seconds
@@ -551,10 +603,10 @@ def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_sti
         additional_stims = []
     if timing_clock is None:
         timing_clock = core.Clock()
-    
+
     target_duration = duration_ms / 1000.0
     start_time = timing_clock.getTime()
-    
+
     # Initial presentation
     fixation.draw()
     if visual_stim:
@@ -563,7 +615,7 @@ def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_sti
         if stim:
             stim.draw()
     win.flip()
-    
+
     # Continue presentation until target time is reached
     while (timing_clock.getTime() - start_time) < target_duration:
         fixation.draw()
@@ -573,17 +625,20 @@ def present_stimulus_with_hybrid_timing(visual_stim, duration_ms, additional_sti
             if stim:
                 stim.draw()
         win.flip()
-    
+
     actual_duration = timing_clock.getTime() - start_time
-    
+
     # Log timing accuracy
     error = abs(actual_duration - target_duration)
     if error > 0.01:  # 10ms tolerance for visual presentation
-        print(f"Visual timing warning: requested {duration_ms:.1f}ms, got {actual_duration*1000:.1f}ms (error: {error*1000:.1f}ms)")
-    
+        print(
+            f"Visual timing warning: requested {duration_ms:.1f}ms, got {actual_duration * 1000:.1f}ms (error: {error * 1000:.1f}ms)")
+
     return actual_duration
 
-def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, av_sync, additional_stims=None, trial_clock=None):
+
+def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, av_sync, additional_stims=None,
+                                        trial_clock=None):
     """
     Standardized stimulus presentation with AV sync correction using frame-based timing.
 
@@ -616,13 +671,13 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
     """
     if additional_stims is None:
         additional_stims = []
-        
+
     if trial_clock is None:
         trial_clock = core.Clock()
-    
+
     stim_onset = 0
     visual_duration_ms = VISUAL_STIM_DURATION * 1000  # Convert to milliseconds
-    
+
     if stimulus_type == 'visual':
         # Visual only - no AV sync correction needed
         fixation.draw()
@@ -632,10 +687,10 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
         win.callOnFlip(trial_clock.reset)
         win.flip()
         stim_onset = trial_clock.getTime()
-        
+
         # Use time-based presentation
         present_stimulus_with_hybrid_timing(visual_stim, visual_duration_ms, additional_stims, trial_clock)
-            
+
     elif stimulus_type == 'audio':
         # Audio only - no AV sync correction needed
         fixation.draw()
@@ -647,10 +702,10 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
             win.callOnFlip(sound_stim.play)
         win.flip()
         stim_onset = trial_clock.getTime()
-        
+
         # Wait for consistent duration (matching visual)
         wait_precise_duration(visual_duration_ms, trial_clock)
-            
+
     elif stimulus_type == 'audiovisual':
         # Audiovisual with AV sync correction using PTB prescheduling when available
         if av_sync == 0:  # Truly simultaneous
@@ -681,7 +736,7 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
             remaining_duration = visual_duration_ms - (trial_clock.getTime() - stim_onset) * 1000
             if remaining_duration > 0:
                 present_stimulus_with_hybrid_timing(visual_stim, remaining_duration, additional_stims, trial_clock)
-                
+
         elif av_sync < 0:  # Audio first (negative correction)
             # SOA measured from audio ONSET to visual ONSET
             wait_frames = calculate_soa_frames(abs(av_sync), frame_dur)
@@ -761,17 +816,18 @@ def present_stimulus_with_robust_timing(stimulus_type, visual_stim, sound_stim, 
 
     return stim_onset
 
+
 # Create window with Mac-specific settings
-win = visual.Window([win_width, win_height], 
-                   color=[c/255 for c in bg_color], 
-                   units="deg", 
-                   monitor=mon,
-                   **WINDOW_CONFIG)
+win = visual.Window([win_width, win_height],
+                    color=[c / 255 for c in bg_color],
+                    units="deg",
+                    monitor=mon,
+                    **WINDOW_CONFIG)
 # Get frame rate using robust detection method
 # Use predicted_framerate from config as fallback if auto-detection fails
 fallback_fps = config.get('predicted_framerate', 60)
 actual_fps = get_reliable_framerate(win, fallback_fps=fallback_fps)
-frame_dur = 1.0/actual_fps
+frame_dur = 1.0 / actual_fps
 
 print(f"Using refresh rate: {actual_fps}Hz")
 VISUAL_FRAMES = max(1, int(VISUAL_STIM_DURATION * actual_fps))
@@ -792,12 +848,13 @@ SRT_ITI_MIN = config.get('srt_iti_min', 1.0)  # seconds
 SRT_ITI_MAX = config.get('srt_iti_max', 3.0)  # seconds
 
 # Create common stimuli
-fixation = visual.ShapeStim(win, 
-    vertices=((0, -0.5), (0, 0.5), (0,0), (-0.5,0), (0.5, 0)),
-    lineWidth=5,
-    closeShape=False,
-    lineColor="black"
-)
+fixation = visual.ShapeStim(win,
+                            vertices=((0, -0.5), (0, 0.5), (0, 0), (-0.5, 0), (0.5, 0)),
+                            lineWidth=5,
+                            closeShape=False,
+                            lineColor="black"
+                            )
+
 
 def cleanup():
     """Clean up resources properly"""
@@ -809,6 +866,7 @@ def cleanup():
         win.close()
     finally:
         core.quit()
+
 
 def show_instructions(text):
     instructions = visual.TextStim(win, text=text, color="black", height=0.7, wrapWidth=30)
@@ -823,9 +881,211 @@ def show_instructions(text):
             core.quit()
         core.wait(0.001)
 
+
+def mandatory_screen_break(duration=60):
+    """
+    Mandatory 60-second screen break.
+    Displays a black screen with white text.
+    Participant cannot continue until the full duration has elapsed.
+    """
+
+    break_text = visual.TextStim(
+        win,
+        text="",
+        color="white",
+        height=0.7,
+        wrapWidth=28
+    )
+
+    break_clock = core.Clock()
+
+    while break_clock.getTime() < duration:
+        remaining = int(np.ceil(duration - break_clock.getTime()))
+
+        break_text.text = (
+            "MANDATORY BREAK\n\n"
+            "Please look away from the screen and rest your eyes.\n\n"
+            f"Time remaining: {remaining} seconds"
+        )
+
+        # Make the break screen black
+        win.color = "black"
+
+        break_text.draw()
+        win.flip()
+
+        # SPACE cannot skip the break.
+        # ESCAPE remains available to the researcher.
+        keys = event.getKeys(keyList=['escape'])
+
+        if 'escape' in keys:
+            cleanup()
+
+        core.wait(0.1)
+
+    continue_text = visual.TextStim(
+        win,
+        text=(
+            "Break complete.\n\n"
+            "Press SPACE when you are ready to continue."
+        ),
+        color="white",
+        height=0.7,
+        wrapWidth=28
+    )
+
+    while True:
+        win.color = "black"
+
+        continue_text.draw()
+        win.flip()
+
+        keys = event.getKeys(keyList=['space', 'escape'])
+
+        if 'space' in keys:
+            # IMPORTANT: restore normal experiment background
+            win.color = "white"
+            win.flip()
+            event.clearEvents()
+            return
+
+        if 'escape' in keys:
+            cleanup()
+
+        core.wait(0.01)
+
+
+def play_between_task_video(video_path):
+    """
+    Play a local video between experiment tasks.
+
+    The participant cannot skip the video.
+    ESCAPE remains available to terminate the experiment.
+    """
+
+    if not video_path:
+        print("No between-task video selected.")
+        return
+
+    # If a relative path was saved, look relative to this script
+    if not os.path.isabs(video_path):
+        video_path = os.path.join(os.path.dirname(__file__), video_path)
+
+    if not os.path.exists(video_path):
+        print(f"ERROR: Between-task video not found: {video_path}")
+
+        error_text = visual.TextStim(
+            win,
+            text=(
+                "The break video could not be loaded.\n\n"
+                "Please notify the researcher."
+            ),
+            color="black",
+            height=0.7,
+            wrapWidth=28
+        )
+
+        while True:
+            error_text.draw()
+            win.flip()
+
+            # Researcher can press ESCAPE to terminate the experiment.
+            keys = event.getKeys(keyList=['escape'])
+
+            if 'escape' in keys:
+                cleanup()
+
+            core.wait(0.01)
+
+    print(f"Playing between-task video: {video_path}")
+
+    # Clear old keyboard presses before video starts
+    event.clearEvents()
+
+    try:
+        movie = visual.MovieStim(
+            win,
+            filename=video_path,
+            size=(win_width, win_height),
+            pos=(0, 0),
+            loop=False,
+            noAudio=False
+        )
+
+        print("Video loaded successfully.")
+
+        while not movie.isFinished:
+            movie.draw()
+            win.flip()
+
+            # Participant cannot skip the video.
+            # ESCAPE remains available for the researcher.
+            keys = event.getKeys(keyList=['escape'])
+
+            if 'escape' in keys:
+                movie.stop()
+                cleanup()
+
+        movie.stop()
+
+    except Exception as e:
+        print(f"ERROR playing between-task video: {e}")
+
+        error_text = visual.TextStim(
+            win,
+            text=(
+                "The between-task video could not be played.\n\n"
+                "Please notify the researcher."
+            ),
+            color="black",
+            height=0.7,
+            wrapWidth=28
+        )
+
+        while True:
+            error_text.draw()
+            win.flip()
+
+            keys = event.getKeys(keyList=['escape'])
+
+            if 'escape' in keys:
+                cleanup()
+
+            core.wait(0.01)
+
+    # Clear any keyboard input made during the video
+    event.clearEvents()
+
+    continue_text = visual.TextStim(
+        win,
+        text=(
+            "The video is complete.\n\n"
+            "Press SPACE when you are ready to continue."
+        ),
+        color="black",
+        height=0.7,
+        wrapWidth=28
+    )
+
+    while True:
+        continue_text.draw()
+        win.flip()
+
+        keys = event.getKeys(keyList=['space', 'escape'])
+
+        if 'space' in keys:
+            event.clearEvents()
+            return
+
+        if 'escape' in keys:
+            cleanup()
+
+        core.wait(0.01)
+
+
 def calculate_soa_frames(soa_ms, frame_dur):
     """Convert SOA in milliseconds to number of frames with consistent rounding."""
-    return max(0, round(abs(soa_ms/1000.0) / frame_dur))
+    return max(0, round(abs(soa_ms / 1000.0) / frame_dur))
 
 
 def get_adjusted_rt(raw_rt, trial_type, av_sync_ms):
@@ -860,7 +1120,7 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     av_sync = config.get('av_sync_correction', 0.0)
     adjusted_soa = soa + av_sync
     print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
-    
+
     # Create SOA display text for test mode
     test_mode = config.get('test_mode', False)
     soa_text = None
@@ -872,27 +1132,27 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
             soa_display = f"V{adjusted_soa}A"
         else:
             soa_display = "SYNC"
-            
+
         # Create visualization of how correction affects timing
         timing_indicator = ""
         if av_sync > 0:
             timing_indicator = f"← Visual shifted earlier by {av_sync}ms"
         elif av_sync < 0:
             timing_indicator = f"Visual shifted later by {abs(av_sync)}ms →"
-        
+
         # Full display text showing both SOA and correction effect
         display_text = f"{soa_display} (orig SOA: {soa}ms, corr: {av_sync}ms)\n{timing_indicator}"
         soa_text = visual.TextStim(win, text=display_text, color="black", height=0.5, pos=(0, 3))
-    
+
     response_made = False
     rt = None
     response = -1
-    
+
     # Additional elements to draw with the visual stimulus
     additional_stims = [instructions, trial_counter]
     if test_mode and soa_text:
         additional_stims.append(soa_text)
-    
+
     # Pre-trial setup
     fixation.draw()
     for stim in additional_stims:
@@ -967,7 +1227,7 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
                 win.callOnFlip(sound_stim.play)
 
             win.flip()
-    
+
     # Response collection - wait until response or timeout
     while not response_made:
         if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
@@ -990,6 +1250,7 @@ def run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
 
     sound_stim.stop()
     return response, rt
+
 
 def run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     print(f"\nStarting toj trial with SOA: {soa}ms")
@@ -1127,25 +1388,26 @@ def run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     sound_stim.stop()
     return response, rt
 
+
 def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     print(f"\nStarting SRT trial: {trial_type}")
     av_sync = config.get('av_sync_correction', 0.0)
     print(f"AV sync correction: {av_sync}ms")
     response_made = False
     rt = None
-    
+
     # Create correction text for test mode
     test_mode = config.get('test_mode', False)
     correction_text = None
     if test_mode:
-        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)", 
-                                         color="black", height=0.5, pos=(0, 3))
-    
+        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)",
+                                          color="black", height=0.5, pos=(0, 3))
+
     # Additional elements to draw with the visual stimulus
     additional_stims = [feedback]
     if test_mode and correction_text:
         additional_stims.append(correction_text)
-    
+
     # Pre-trial setup
     fixation.draw()
     for stim in additional_stims:
@@ -1154,9 +1416,9 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
     foreperiod = random.uniform(SRT_ITI_MIN, SRT_ITI_MAX)
     print(f"Waiting foreperiod: {foreperiod}s")
     core.wait(foreperiod)
-    
+
     trial_clock = core.Clock()
-    
+
     # Use robust time-based stimulus presentation
     stim_onset = present_stimulus_with_robust_timing(
         stimulus_type=trial_type,
@@ -1166,7 +1428,7 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
         additional_stims=additional_stims,
         trial_clock=trial_clock
     )
-    
+
     # Response collection
     response_window = SRT_RESPONSE_WINDOW
     while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
@@ -1174,7 +1436,7 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
         for stim in additional_stims:
             stim.draw()
         win.flip()
-        
+
         keys = event.getKeys(['space', 'escape'], timeStamped=trial_clock)
         for key in keys:
             if key[0] == 'escape':
@@ -1184,14 +1446,15 @@ def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
                 response_made = True
                 print(f"Response at {rt}s")
                 break
-    
+
     sound_stim.stop()
-    
+
     if rt is not None and rt < 0.05:
         print("Response too fast")
         return None
-    
+
     return rt
+
 
 def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, feedback):
     print(f"\nStarting SRT_Mod trial: {trial_type}")
@@ -1199,19 +1462,19 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
     print(f"AV sync correction: {av_sync}ms")
     response_made = False
     rt = None
-    
+
     # Create correction text for test mode
     test_mode = config.get('test_mode', False)
     correction_text = None
     if test_mode:
-        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)", 
-                                         color="black", height=0.5, pos=(0, 3))
-    
+        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)",
+                                          color="black", height=0.5, pos=(0, 3))
+
     # Additional elements to draw with the visual stimulus
     additional_stims = [feedback, instructions]
     if test_mode and correction_text:
         additional_stims.append(correction_text)
-    
+
     # Pre-trial setup
     fixation.draw()
     for stim in additional_stims:
@@ -1229,18 +1492,18 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
         elif '_right' in trial_type:
             return visual_stim_right
         return None
-    
+
     def get_sound_stim():
         if '_left' in trial_type:
             return sound_left
         elif '_right' in trial_type:
             return sound_right
         return None
-    
+
     # Stop any playing sounds first
     sound_left.stop()
     sound_right.stop()
-    
+
     # Determine stimulus type and get appropriate stimuli
     if 'audiovisual' in trial_type:
         if '_bilateral' in trial_type:
@@ -1251,7 +1514,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                     stim.draw()
                 win.callOnFlip(trial_clock.reset)
                 win.flip()
-                
+
                 # Start visual and audio together
                 fixation.draw()
                 visual_stim_left.draw()
@@ -1262,7 +1525,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 win.callOnFlip(sound_right.play)
                 win.flip()
                 stim_onset = trial_clock.getTime()
-                
+
                 # Present bilateral visual for remaining frames
                 for frame in range(VISUAL_FRAMES - 1):
                     fixation.draw()
@@ -1344,7 +1607,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 additional_stims=additional_stims,
                 trial_clock=trial_clock
             )
-            
+
     elif 'visual' in trial_type:
         if '_bilateral' in trial_type:
             # Bilateral visual
@@ -1356,7 +1619,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
             win.callOnFlip(trial_clock.reset)
             win.flip()
             stim_onset = trial_clock.getTime()
-            
+
             for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
                 visual_stim_left.draw()
@@ -1375,7 +1638,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 additional_stims=additional_stims,
                 trial_clock=trial_clock
             )
-            
+
     elif 'audio' in trial_type:
         if '_bilateral' in trial_type:
             # Bilateral audio
@@ -1387,7 +1650,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
             win.callOnFlip(sound_right.play)
             win.flip()
             stim_onset = trial_clock.getTime()
-            
+
             for frame in range(VISUAL_FRAMES - 1):
                 fixation.draw()
                 for stim in additional_stims:
@@ -1404,7 +1667,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 additional_stims=additional_stims,
                 trial_clock=trial_clock
             )
-    
+
     # Response collection
     response_window = SRT_RESPONSE_WINDOW
     while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
@@ -1412,7 +1675,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
         for stim in additional_stims:
             stim.draw()
         win.flip()
-        
+
         keys = event.getKeys(['space', 'escape'], timeStamped=trial_clock)
         for key in keys:
             if key[0] == 'escape':
@@ -1422,23 +1685,25 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
                 response_made = True
                 print(f"Response at {rt}s")
                 break
-    
+
     # End trial - stop all sounds
     sound_left.stop()
     sound_right.stop()
-    
+
     if rt is not None and rt < 0.05:
         print("Response too fast")
         return None
-    
+
     return rt
 
-def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, trial_counter):
+
+def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions,
+                     trial_counter):
     print(f"\nStarting SJ_Mod trial: {trial_type}, SOA: {soa}ms, Side: {side}")
     av_sync = config.get('av_sync_correction', 0.0)
     adjusted_soa = soa + av_sync
     print(f"AV sync correction: {av_sync}ms, Adjusted SOA: {adjusted_soa}ms")
-    
+
     # Create SOA display text for test mode
     test_mode = config.get('test_mode', False)
     soa_text = None
@@ -1466,19 +1731,19 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 soa_display = "A-SYNC"
             else:
                 soa_display = f"A{first_marker}{abs(soa)}A{second_marker}"
-        
-        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (orig: {soa}ms, corr: {av_sync}ms)", 
-                                  color="black", height=0.5, pos=(0, 3))
-    
+
+        soa_text = visual.TextStim(win, text=f"{trial_type}: {soa_display} (orig: {soa}ms, corr: {av_sync}ms)",
+                                   color="black", height=0.5, pos=(0, 3))
+
     response_made = False
     rt = None
     response = -1
-    
+
     # Additional elements to draw
     additional_stims = [instructions, trial_counter]
     if test_mode and soa_text:
         additional_stims.append(soa_text)
-    
+
     # Pre-trial setup
     fixation.draw()
     for stim in additional_stims:
@@ -1495,7 +1760,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             first_stim, second_stim = visual_stim_left, visual_stim_right
         else:
             first_stim, second_stim = visual_stim_right, visual_stim_left
-        
+
         if soa == 0:  # Simultaneous
             # Show both stimuli for full duration
             fixation.draw()
@@ -1505,7 +1770,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 stim.draw()
             win.callOnFlip(trial_clock.reset)
             win.flip()
-            
+
             # Use a custom function for bilateral stimulus presentation since
             # we can't use ensure_visual_presentation with multiple stimuli
             for frame in range(VISUAL_FRAMES - 1):
@@ -1538,17 +1803,17 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                 for stim in additional_stims:
                     stim.draw()
                 win.flip()
-    
+
     elif trial_type == 'auditory':
         # Stop any playing sounds
         sound_left.stop()
         sound_right.stop()
-        
+
         if side == 'left':
             first_sound, second_sound = sound_left, sound_right
         else:
             first_sound, second_sound = sound_right, sound_left
-        
+
         if soa == 0:  # Simultaneous bilateral audio
             fixation.draw()
             for stim in additional_stims:
@@ -1591,17 +1856,17 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                         win.callOnFlip(second_sound.play)
 
                 win.flip()
-    
+
     elif trial_type == 'audiovisual':
         # Stop any playing sounds
         sound_left.stop()
         sound_right.stop()
-        
+
         if side == 'left':
             visual_stim, sound_stim = visual_stim_left, sound_left
         else:
             visual_stim, sound_stim = visual_stim_right, sound_right
-        
+
         if adjusted_soa == 0:  # Simultaneous audiovisual
             # Two-flip pattern: first flip resets clock, second presents stimuli.
             # Capture stim_onset so RT is measured from actual stimulus appearance.
@@ -1685,7 +1950,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
                     win.callOnFlip(sound_stim.play)
 
                 win.flip()
-    
+
     # Wait for response with clean frame rendering
     while not response_made:
         if MAX_RESPONSE_TIME and trial_clock.getTime() > MAX_RESPONSE_TIME:
@@ -1713,7 +1978,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
 
 
 def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions,
-                     trial_counter):
+                      trial_counter):
     print(f"\nStarting toj_Mod trial: {trial_type}, SOA: {soa}ms, Side: {side}")
     av_sync = config.get('av_sync_correction', 0.0)
     adjusted_soa = soa + av_sync
@@ -1996,39 +2261,45 @@ def run_block(block_config, data_filename, config):
     exp_type = block_config['experiment'].lower()
     trials_per_condition = block_config['trials_per_condition']
     block_number = block_config['block_number']
-    
+
     # Create experiment-specific stimuli
     if exp_type == 'srt':
         stim_color = [255, 0, 0]  # Red
-        visual_stim = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in stim_color], pos=(0, 0))
+        visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
         total_trials = trials_per_condition * 3
-        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black", pos=(0, -7), height=0.5)
+        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black",
+                                       pos=(0, -7), height=0.5)
         feedback = visual.TextStim(win, text="", color="black", pos=(0, -5))
         trial_types = ['visual', 'audio', 'audiovisual'] * trials_per_condition
-        
+
     elif exp_type == 'srt_mod':
         left_color = [0, 255, 0] if block_config.get('left_visual_green', False) else [255, 0, 0]
         right_color = [255, 0, 0] if block_config.get('left_visual_green', False) else [0, 255, 0]
-        visual_stim_left = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in left_color], pos=(-10, 0))
-        visual_stim_right = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in right_color], pos=(10, 0))
-        
+        visual_stim_left = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in left_color],
+                                         pos=(-10, 0))
+        visual_stim_right = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in right_color],
+                                          pos=(10, 0))
+
         left_audio = "high" if block_config.get('left_audio_high', False) else "low"
         right_audio = "low" if block_config.get('left_audio_high', False) else "high"
-        sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), f"{left_audio}_pitch.wav"), secs=VISUAL_STIM_DURATION)
-        sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), f"{right_audio}_pitch.wav"), secs=VISUAL_STIM_DURATION)
+        sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), f"{left_audio}_pitch.wav"),
+                                 secs=VISUAL_STIM_DURATION)
+        sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), f"{right_audio}_pitch.wav"),
+                                  secs=VISUAL_STIM_DURATION)
 
         trial_types = (['visual_left', 'visual_right', 'visual_bilateral',
-                       'audio_left', 'audio_right', 'audio_bilateral',
-                       'audiovisual_left', 'audiovisual_right', 'audiovisual_bilateral']
-                      * trials_per_condition)
+                        'audio_left', 'audio_right', 'audio_bilateral',
+                        'audiovisual_left', 'audiovisual_right', 'audiovisual_bilateral']
+                       * trials_per_condition)
         total_trials = len(trial_types)
-        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black", pos=(0, -7), height=0.5)
+        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black",
+                                       pos=(0, -7), height=0.5)
         feedback = visual.TextStim(win, text="", color="black", pos=(0, -5))
 
     elif exp_type == 'sj':
         stim_color = [255, 0, 0]  # Red
-        visual_stim = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in stim_color], pos=(0, 0))
+        visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
         # Non-synchronous SOAs
         sj_nonzero_soas = [
@@ -2045,6 +2316,11 @@ def run_block(block_config, data_filename, config):
 
         # Combine them: 50% synchronous, 50% asynchronous
         trial_types = zero_trials + nonzero_trials
+
+        # Add 10 catch trials at a clearly discriminable 1-second SOA.
+        # Five are audio-first (-1000 ms) and five are visual-first (+1000 ms).
+        catch_trials = [-1000] * 5 + [1000] * 5
+        trial_types += catch_trials
 
         total_trials = len(trial_types)
 
@@ -2063,42 +2339,51 @@ def run_block(block_config, data_filename, config):
             pos=(0, -8),
             height=0.5
         )
-        
+
     elif exp_type == 'sj_mod':
         stim_color = [255, 0, 0]  # Red
-        visual_stim_left = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in stim_color], pos=(-10, 0))
-        visual_stim_right = visual.Circle(win, radius=stim_size/2, fillColor=[c/255 for c in stim_color], pos=(10, 0))
+        visual_stim_left = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],
+                                         pos=(-10, 0))
+        visual_stim_right = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],
+                                          pos=(10, 0))
         sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
         total_trials = len(sj_mod_soas) * trials_per_condition * 6  # 6 conditions
-        instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black", pos=(0, -7), height=0.5)
+        instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black",
+                                       pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
         trial_types = [(cond, soa, side)
-                      for cond in ['visual', 'auditory', 'audiovisual']
-                      for soa in sj_mod_soas
-                      for side in ['left', 'right']
-                      for _ in range(trials_per_condition)]
+                       for cond in ['visual', 'auditory', 'audiovisual']
+                       for soa in sj_mod_soas
+                       for side in ['left', 'right']
+                       for _ in range(trials_per_condition)]
 
     elif exp_type == 'toj':
         stim_color = [255, 0, 0]  # Red
         visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
         toj_soas = [-300, -250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250, 300]
-        total_trials = len(toj_soas) * trials_per_condition
-        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black", pos=(0, -7), height=0.5)
+        # Add 10 catch trials at a 1-second SOA: 5 audio-first and 5 visual-first.
+        catch_trials = [-1000] * 5 + [1000] * 5
+        total_trials = len(toj_soas) * trials_per_condition + len(catch_trials)
+        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black",
+                                       pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
-        trial_types =toj_soas * trials_per_condition
+        trial_types = toj_soas * trials_per_condition + catch_trials
 
     elif exp_type == 'toj_mod':
         stim_color = [255, 0, 0]  # Red
-        visual_stim_left = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(-10, 0))
-        visual_stim_right = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],pos=(10, 0))
+        visual_stim_left = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],
+                                         pos=(-10, 0))
+        visual_stim_right = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color],
+                                          pos=(10, 0))
         sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
         toj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
         total_trials = len(toj_mod_soas) * trials_per_condition * 6  # 6 conditions
-        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black", pos=(0, -7), height=0.5)
+        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black",
+                                       pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
         trial_types = [(cond, soa, side)
                        for cond in ['visual', 'auditory', 'audiovisual']
@@ -2116,19 +2401,19 @@ def run_block(block_config, data_filename, config):
     # Show instructions
     if exp_type in ['sj', 'sj_mod']:
         show_instructions("You will see a red circle and hear a tone.\n"
-                        "Your task is to judge if they occurred at the same time or not.\n\n"
-                        "Press '1' if they seemed to occur at the same time.\n"
-                        "Press '2' if they seemed to occur at different times.\n\n"
-                        "Press SPACE to begin.")
+                          "Your task is to judge if they occurred at the same time or not.\n\n"
+                          "Press '1' if they seemed to occur at the same time.\n"
+                          "Press '2' if they seemed to occur at different times.\n\n"
+                          "Press SPACE to begin.")
     elif exp_type in ['toj', 'toj_mod']:
         show_instructions("You will see a red circle and hear a tone.\n"
-                        "Your task is to judge which stimuli came first.\n\n"
-                        "Press '1' if Audio came 1st.\n"
-                        "Press '2' if Visual came 1st.\n\n"
-                        "Press SPACE to begin.")
+                          "Your task is to judge which stimuli came first.\n\n"
+                          "Press '1' if Audio came 1st.\n"
+                          "Press '2' if Visual came 1st.\n\n"
+                          "Press SPACE to begin.")
     else:
         show_instructions("Press spacebar when you see or hear a stimulus.\n\n"
-                        "Press SPACE to begin.")
+                          "Press SPACE to begin.")
 
     best_rt = float('inf')  # Initialize best RT for SRT and SRT_Mod
     for trial_num, trial in enumerate(trial_types, 1):
@@ -2152,7 +2437,8 @@ def run_block(block_config, data_filename, config):
         elif exp_type == 'sj_mod':
             trial_counter.text = f"Trial {trial_num}/{total_trials}"
             trial_type, soa, side = trial
-            response, rt = run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, trial_counter)
+            response, rt = run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left,
+                                            sound_right, instructions, trial_counter)
         elif exp_type == 'toj':
             trial_counter.text = f"Trial {trial_num}/{total_trials}"
             soa = trial
@@ -2161,7 +2447,8 @@ def run_block(block_config, data_filename, config):
         elif exp_type == 'toj_mod':
             trial_counter.text = f"Trial {trial_num}/{total_trials}"
             trial_type, soa, side = trial
-            response, rt = run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, trial_counter)
+            response, rt = run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left,
+                                             sound_right, instructions, trial_counter)
         elif exp_type == 'srt':
             trial_type = trial
             rt = run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback)
@@ -2172,7 +2459,8 @@ def run_block(block_config, data_filename, config):
                 feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nToo fast or too slow! Invalid response."
         elif exp_type == 'srt_mod':
             trial_type = trial
-            rt = run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, feedback)
+            rt = run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_left, sound_right,
+                                   instructions, feedback)
             if rt is not None:
                 best_rt = min(best_rt, rt)
                 feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nLast RT: {rt:.3f}s\nBest RT: {best_rt:.3f}s"
@@ -2192,15 +2480,23 @@ def run_block(block_config, data_filename, config):
             csv.writer(csvfile).writerow(trial_data)
             csvfile.flush()
 
+        # Mandatory 2-minute break every 50 completed trials
+        # Do not trigger a break after the final trial of the block.
+        if trial_num % 50 == 0 and trial_num < total_trials:
+            mandatory_screen_break(duration=60)
+
         # Check for escape key
         if event.getKeys(['escape']):
             break
 
     # Final message
-    final_message = visual.TextStim(win, text=f"Block complete!\nThank you for participating in the {exp_type.upper()} experiment.", color="black", height=0.7)
+    final_message = visual.TextStim(win,
+                                    text=f"Block complete!\nThank you for participating in the {exp_type.upper()} experiment.",
+                                    color="black", height=0.7)
     final_message.draw()
     win.flip()
     core.wait(3)
+
 
 def check_sound_files():
     required_files = ["tone.wav", "high_pitch.wav", "low_pitch.wav"]
@@ -2218,6 +2514,7 @@ def check_sound_files():
             if not os.path.exists(filepath):
                 print(f"Error: Sound file {filename} was not created.")
                 sys.exit(1)
+
 
 check_sound_files()
 
@@ -2266,27 +2563,41 @@ def run_experiment_series(config):
     """Run the experiment series with improved logging and error handling."""
     try:
         print("Starting experiment series...")
-        
+
         # Create unique filename for data saving
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         offline_mode = config.get('offline_mode', False)
         offline_tag = "_offline" if offline_mode else ""
-        data_filename = f"data_{config['participant_id']}_{config['age']}_{config['gender']}_{config['site']}{offline_tag}_{timestamp}.csv"
+        participant_id = str(config['participant_id']).zfill(3)
+
+        participant_folder = get_participant_folder(
+            participant_id
+        )
+
+        data_filename = os.path.join(
+            participant_folder,
+            f"data_{participant_id}_{config['age']}_{config['gender']}_{config['site']}_{timestamp}.csv"
+        )
+
         print(f"Created data file: {data_filename}")
 
         # Prepare data file with headers
         with open(data_filename, 'w', newline='') as csvfile:
             csvwriter = csv.writer(csvfile)
             csvwriter.writerow(['Participant_ID', 'Age', 'Gender', 'Site', 'Block_Number', 'Trial_Number',
-                              'Trial_Type', 'SOA', 'Side', 'Response', 'Reaction_Time', 'Adjusted_RT',
-                              'AV_Sync_Correction', 'Timestamp', 'Experiment'])
-        
+                                'Trial_Type', 'SOA', 'Side', 'Response', 'Reaction_Time', 'Adjusted_RT',
+                                'AV_Sync_Correction', 'Timestamp', 'Experiment'])
+
         print(f"Starting {len(config['blocks'])} blocks...")
+
+        # Track which between-task video should play next
+        transition_video_index = 0
+
         for i, block in enumerate(config['blocks'], 1):
             print(f"\nRunning block {i}/{len(config['blocks'])}")
             run_block(block, data_filename, config)
             print(f"Block {i} complete")
-            
+
             # Upload data after each block if not in offline mode
             if project and not offline_mode:
                 print("\nInitiating REDCap upload...")
@@ -2299,25 +2610,65 @@ def run_experiment_series(config):
             else:
                 print("REDCap project not initialized. Skipping REDCap upload.")
 
-            # Short break between blocks
-            if block != config['blocks'][-1]:
-                print("Waiting for participant to continue...")
-                break_text = visual.TextStim(win, text=f"Take a short break.\n\nPress SPACE when you're ready to continue to the next block.", 
-                                          color="black", height=0.7)
-                break_text.draw()
-                win.flip()
-                keys = event.waitKeys(keyList=['space', 'escape'])
-                if 'escape' in keys:
-                    raise KeyboardInterrupt("Experiment terminated by user")
+            # ---------------------------------------------------------
+            # BETWEEN-TASK VIDEO
+            # ---------------------------------------------------------
+            # Play the selected video only when:
+            #   1. There is another block after this one, AND
+            #   2. The next block is a different experiment/task.
+            #
+            # Example:
+            # SJ -> TOJ = video
+            # TOJ -> SRT = video
+            # SJ -> SJ = no video
+            # Final task = no video
+            # ---------------------------------------------------------
+
+            if i < len(config['blocks']):
+                current_task = block['experiment'].lower()
+                next_task = config['blocks'][i]['experiment'].lower()
+
+                if current_task != next_task:
+
+                    between_task_videos = config.get(
+                        'between_task_videos',
+                        []
+                    )
+
+                    if transition_video_index >= len(between_task_videos):
+                        raise RuntimeError(
+                            "No video configured for "
+                            f"task transition {transition_video_index + 1}"
+                        )
+
+                    video_path = between_task_videos[
+                        transition_video_index
+                    ]
+
+                    print(
+                        f"Task transition: "
+                        f"{current_task.upper()} -> "
+                        f"{next_task.upper()}"
+                    )
+
+                    print(
+                        f"Playing break video "
+                        f"{transition_video_index + 1}: "
+                        f"{video_path}"
+                    )
+
+                    play_between_task_video(video_path)
+
+                    transition_video_index += 1
 
         # Experiment series complete
         print("\nAll blocks completed successfully")
-        final_message = visual.TextStim(win, text="All blocks complete!\nThank you for your participation.", 
-                                      color="black", height=0.7)
+        final_message = visual.TextStim(win, text="All blocks complete!\nThank you for your participation.",
+                                        color="black", height=0.7)
         final_message.draw()
         win.flip()
         core.wait(1)
-        
+
         # Final upload to ensure everything is saved
         if project and os.path.exists(data_filename) and not offline_mode:
             print("Performing final data upload...")
@@ -2328,7 +2679,7 @@ def run_experiment_series(config):
                 print("Final data upload failed")
         elif offline_mode:
             print("Experiment completed in offline mode. Data saved locally.")
-        
+
         return data_filename
 
     except Exception as e:
@@ -2341,6 +2692,7 @@ def run_experiment_series(config):
         # sound_stim.stop()
         win.close()
         core.quit()
+
 
 if __name__ == "__main__":
     run_experiment_series(config)

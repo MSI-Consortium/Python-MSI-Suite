@@ -29,7 +29,7 @@ def logistic(x, PSS, slope):
     return 1 / (1 + np.exp(-(x - PSS) / slope))
 
 #import data
-df = pd.read_csv("../Data/data_003_19_f_vandy_offline_20260717_165618.csv")
+df = pd.read_csv("../Data/Participant_003/data_003_19_f_vandy_offline_20260717_165618.csv")
 
 #Separate the 3 data sets
 sj = df[df["Experiment"] == "sj"].copy()

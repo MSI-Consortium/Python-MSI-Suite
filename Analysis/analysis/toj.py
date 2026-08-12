@@ -30,6 +30,18 @@ def analyze_toj(
     """
 
 
+    # Catch-trial QC: |SOA| == 1000 ms.
+    # Negative SOA = audio first (correct response 1); positive SOA = visual first (correct response 2).
+    catch_mask = toj["SOA"].abs() == 1000
+    toj_catch = toj.loc[catch_mask].copy()
+    toj_catch_trials = len(toj_catch)
+    expected = np.where(toj_catch["SOA"] < 0, 1, 2)
+    toj_catch_correct = int((toj_catch["Response"].to_numpy() == expected).sum())
+    TOJ_Catch_OK = toj_catch_trials == 10 and toj_catch_correct >= 8
+
+    # Exclude catch trials from the psychometric fit and ordinary response-bias QC.
+    toj = toj.loc[~catch_mask].copy()
+
     # Convert responses to binary:
     # 1 = Visual First
     # 0 = Audio First
@@ -147,6 +159,9 @@ def analyze_toj(
         "JND_ms": [JND],
         "R2": [r_squared],
         "TOJ_Fit_OK": [TOJ_Fit_OK],
+        "TOJ_Catch_Trials": [toj_catch_trials],
+        "TOJ_Catch_Correct": [toj_catch_correct],
+        "TOJ_Catch_OK": [TOJ_Catch_OK],
         **soa_trial_counts
     })
 
@@ -247,6 +262,9 @@ def analyze_toj(
     # Return results to Main_Analysis
     return {
         "TOJ_Trials": toj_trials,
+        "TOJ_Catch_Trials": toj_catch_trials,
+        "TOJ_Catch_Correct": toj_catch_correct,
+        "TOJ_Catch_OK": TOJ_Catch_OK,
         "TOJ_Valid_Trials": toj_valid_trials,
 
         "TOJ_Audio_First": toj_audio_first,
