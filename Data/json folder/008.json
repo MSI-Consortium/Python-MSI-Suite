@@ -1,0 +1,47 @@
+{
+  "participant_id": "008",
+  "age": 30,
+  "gender": "f",
+  "site": "vandy",
+  "fullscreen": true,
+  "test_mode": false,
+  "offline_mode": true,
+  "api_url": "[insert your url here]",
+  "api_token": " [insert your api key here]",
+  "av_sync_correction": -20.0,
+  "predicted_framerate": 60,
+  "iti_min": 1.0,
+  "iti_max": 2.0,
+  "srt_iti_min": 1.0,
+  "srt_iti_max": 3.0,
+  "max_response_time": null,
+  "srt_response_window": 2.0,
+  "between_task_videos": [
+    "C:/Users/multi/OneDrive/Documents/github/Python-MSI-Suite/Break_Videos/Aline_Dykmans_-_Sheep_Possible_(2015).mp4",
+    "C:/Users/multi/OneDrive/Documents/github/Python-MSI-Suite/Break_Videos/Lava_Hijzelaar_-_Imagine_(2020).mp4"
+  ],
+  "blocks": [
+    {
+      "experiment": "SJ",
+      "block_number": 1,
+      "trials_per_condition": 16,
+      "total_trials": 394,
+      "estimated_time": 13.5
+    },
+    {
+      "experiment": "TOJ",
+      "block_number": 2,
+      "trials_per_condition": 16,
+      "total_trials": 218,
+      "estimated_time": 7.4
+    },
+    {
+      "experiment": "SRT",
+      "block_number": 3,
+      "trials_per_condition": 100,
+      "total_trials": 300,
+      "estimated_time": 7.8
+    }
+  ],
+  "total_estimated_time": 28.7
+}

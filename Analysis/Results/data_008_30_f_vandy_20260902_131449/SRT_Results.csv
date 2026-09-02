@@ -1,0 +1,2 @@
+Trials,Valid_Trials,Clean_Trials,Misses,Anticipations,Mean_Adjusted_RT_ms,Median_Adjusted_RT_ms,SD_Adjusted_RT_ms,CV_Adjusted_RT,Fastest_RT_ms,Slowest_RT_ms,SRT_QC_OK
+300,175,175,125,0,264.9681725665927,242.221999913454,84.8500838314649,0.32022745603583797,166.7136000655591,720.3518999740481,False
