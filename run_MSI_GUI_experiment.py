@@ -888,6 +888,10 @@ def mandatory_screen_break(duration=60):
     Participant cannot continue until the full duration has elapsed.
     """
 
+    event.clearEvents(
+        eventType="keyboard"
+    )
+
     break_text = visual.TextStim(
         win,
         text="",
@@ -1388,71 +1392,297 @@ def run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter):
     return response, rt
 
 
-def run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback):
-    print(f"\nStarting SRT trial: {trial_type}")
-    av_sync = config.get('av_sync_correction', 0.0)
-    print(f"AV sync correction: {av_sync}ms")
+def run_srt_trial(
+        trial_type,
+        visual_stim,
+        sound_stim,
+        instructions,
+        feedback
+):
+    """
+    Run one standard SRT trial.
+
+    Returns
+    -------
+    rt : float or None
+        Reaction time in seconds.
+
+    response_status : str
+        "VALID"
+        "ANTICIPATION"
+        "TIMEOUT"
+
+    This version explicitly clears stale keyboard events before
+    each trial and provides a diagnostic status for every trial.
+    """
+
+    print(
+        f"\nStarting SRT trial: {trial_type}"
+    )
+
+    av_sync = config.get(
+        'av_sync_correction',
+        0.0
+    )
+
+    print(
+        f"AV sync correction: {av_sync}ms"
+    )
+
     response_made = False
     rt = None
+    response_status = "TIMEOUT"
 
-    # Create correction text for test mode
-    test_mode = config.get('test_mode', False)
+    # ==================================================
+    # TEST MODE DISPLAY
+    # ==================================================
+
+    test_mode = config.get(
+        'test_mode',
+        False
+    )
+
     correction_text = None
+
     if test_mode:
-        correction_text = visual.TextStim(win, text=f"(corr: {av_sync}ms)",
-                                          color="black", height=0.5, pos=(0, 3))
 
-    # Additional elements to draw with the visual stimulus
-    additional_stims = [feedback]
-    if test_mode and correction_text:
-        additional_stims.append(correction_text)
+        correction_text = visual.TextStim(
+            win,
+            text=f"(corr: {av_sync}ms)",
+            color="black",
+            height=0.5,
+            pos=(0, 3)
+        )
 
-    # Pre-trial setup
+    additional_stims = [
+        feedback
+    ]
+
+    if (
+        test_mode
+        and correction_text
+    ):
+
+        additional_stims.append(
+            correction_text
+        )
+
+    # ==================================================
+    # IMPORTANT:
+    # CLEAR OLD KEYBOARD EVENTS
+    # ==================================================
+
+    event.clearEvents(
+        eventType="keyboard"
+    )
+
+    # ==================================================
+    # PRE-TRIAL FIXATION
+    # ==================================================
+
     fixation.draw()
+
     for stim in additional_stims:
-        stim.draw()
+
+        if stim:
+            stim.draw()
+
     win.flip()
-    foreperiod = random.uniform(SRT_ITI_MIN, SRT_ITI_MAX)
-    print(f"Waiting foreperiod: {foreperiod}s")
-    core.wait(foreperiod)
+
+    # ==================================================
+    # RANDOM FOREPERIOD
+    # ==================================================
+
+    foreperiod = random.uniform(
+        SRT_ITI_MIN,
+        SRT_ITI_MAX
+    )
+
+    print(
+        f"Waiting foreperiod: "
+        f"{foreperiod:.3f}s"
+    )
+
+    core.wait(
+        foreperiod
+    )
+
+    # ==================================================
+    # CLEAR KEYS AGAIN IMMEDIATELY BEFORE STIMULUS
+    # ==================================================
+    #
+    # This prevents SPACE presses made during the
+    # foreperiod from being mistaken for responses
+    # to the upcoming stimulus.
+    # ==================================================
+
+    event.clearEvents(
+        eventType="keyboard"
+    )
+
+    # ==================================================
+    # STIMULUS PRESENTATION
+    # ==================================================
 
     trial_clock = core.Clock()
 
-    # Use robust time-based stimulus presentation
-    stim_onset = present_stimulus_with_robust_timing(
-        stimulus_type=trial_type,
-        visual_stim=visual_stim,
-        sound_stim=sound_stim,
-        av_sync=av_sync,
-        additional_stims=additional_stims,
-        trial_clock=trial_clock
+    stim_onset = (
+        present_stimulus_with_robust_timing(
+            stimulus_type=trial_type,
+            visual_stim=visual_stim,
+            sound_stim=sound_stim,
+            av_sync=av_sync,
+            additional_stims=additional_stims,
+            trial_clock=trial_clock
+        )
     )
 
-    # Response collection
-    response_window = SRT_RESPONSE_WINDOW
-    while (trial_clock.getTime() - stim_onset) < response_window and not response_made:
-        fixation.draw()
-        for stim in additional_stims:
-            stim.draw()
-        win.flip()
+    print(
+        f"Stimulus onset: "
+        f"{stim_onset:.6f}s"
+    )
 
-        keys = event.getKeys(['space', 'escape'], timeStamped=trial_clock)
-        for key in keys:
-            if key[0] == 'escape':
-                cleanup()
-            elif key[0] == 'space':
-                rt = key[1] - stim_onset
-                response_made = True
-                print(f"Response at {rt}s")
-                break
+    # ==================================================
+    # RESPONSE COLLECTION
+    # ==================================================
 
-    sound_stim.stop()
+    response_window = (
+        SRT_RESPONSE_WINDOW
+    )
 
-    if rt is not None and rt < 0.05:
-        print("Response too fast")
-        return None
+    while (
+        trial_clock.getTime()
+        - stim_onset
+        < response_window
+        and not response_made
+    ):
 
-    return rt
+        # --------------------------------
+        # Check keyboard FIRST
+        # --------------------------------
+
+        keys = event.getKeys(
+            keyList=[
+                'space',
+                'escape'
+            ],
+            timeStamped=trial_clock
+        )
+
+        if keys:
+
+            for key_name, key_time in keys:
+
+                if key_name == 'escape':
+
+                    cleanup()
+
+                elif key_name == 'space':
+
+                    rt = (
+                        key_time
+                        - stim_onset
+                    )
+
+                    response_made = True
+
+                    print(
+                        f"SPACE detected at "
+                        f"{key_time:.6f}s"
+                    )
+
+                    print(
+                        f"Raw RT: "
+                        f"{rt:.6f}s"
+                    )
+
+                    break
+
+        # --------------------------------
+        # Continue displaying fixation
+        # --------------------------------
+
+        if not response_made:
+
+            fixation.draw()
+
+            for stim in additional_stims:
+
+                if stim:
+                    stim.draw()
+
+            win.flip()
+
+    # ==================================================
+    # STOP SOUND
+    # ==================================================
+
+    if sound_stim:
+
+        try:
+            sound_stim.stop()
+
+        except Exception:
+            pass
+
+    # ==================================================
+    # CLASSIFY RESPONSE
+    # ==================================================
+
+    if rt is None:
+
+        response_status = (
+            "TIMEOUT"
+        )
+
+        print(
+            "SRT TIMEOUT: "
+            "No SPACE response detected "
+            f"within {response_window:.2f}s."
+        )
+
+        return (
+            None,
+            response_status
+        )
+
+    # --------------------------------
+    # Extremely early response
+    # --------------------------------
+
+    if rt < 0.05:
+
+        response_status = (
+            "ANTICIPATION"
+        )
+
+        print(
+            "SRT ANTICIPATION: "
+            f"{rt * 1000:.1f} ms"
+        )
+
+        return (
+            rt,
+            response_status
+        )
+
+    # --------------------------------
+    # Normal response
+    # --------------------------------
+
+    response_status = (
+        "VALID"
+    )
+
+    print(
+        "SRT VALID RESPONSE: "
+        f"{rt * 1000:.1f} ms"
+    )
+
+    return (
+        rt,
+        response_status
+    )
 
 
 def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions, feedback):
@@ -2421,11 +2651,16 @@ def run_block(block_config, data_filename, config):
         age = config['age']
         gender = config['gender']
         site = config['site']
+
         trial_type = np.nan
         soa = np.nan
         side = ''
+
         response = np.nan
         rt = np.nan
+
+        response_status = ""
+
         timestamp = core.getTime()
 
         if exp_type == 'sj':
@@ -2448,32 +2683,283 @@ def run_block(block_config, data_filename, config):
             trial_type, soa, side = trial
             response, rt = run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left,
                                              sound_right, instructions, trial_counter)
-        elif exp_type == 'srt':
-            trial_type = trial
-            rt = run_srt_trial(trial_type, visual_stim, sound_stim, instructions, feedback)
-            if rt is not None:
-                best_rt = min(best_rt, rt)
-                feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nLast RT: {rt:.3f}s\nBest RT: {best_rt:.3f}s"
-            else:
-                feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nToo fast or too slow! Invalid response."
-        elif exp_type == 'srt_mod':
-            trial_type = trial
-            rt = run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_left, sound_right,
-                                   instructions, feedback)
-            if rt is not None:
-                best_rt = min(best_rt, rt)
-                feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nLast RT: {rt:.3f}s\nBest RT: {best_rt:.3f}s"
-            else:
-                feedback.text = f"Block {block_number}, Trial {trial_num}/{total_trials}\nToo fast or too slow! Invalid response."
 
+        if exp_type == 'sj':
+
+            trial_counter.text = (
+
+                f"Trial {trial_num}/{total_trials}"
+
+            )
+
+            soa = trial
+
+            response, rt = run_sj_trial(
+
+                soa,
+
+                visual_stim,
+
+                sound_stim,
+
+                instructions,
+
+                trial_counter
+
+            )
+
+            trial_type = 'audiovisual'
+
+
+
+        elif exp_type == 'sj_mod':
+
+            trial_counter.text = (
+
+                f"Trial {trial_num}/{total_trials}"
+
+            )
+
+            trial_type, soa, side = trial
+
+            response, rt = run_sj_mod_trial(
+
+                trial_type,
+
+                soa,
+
+                side,
+
+                visual_stim_left,
+
+                visual_stim_right,
+
+                sound_left,
+
+                sound_right,
+
+                instructions,
+
+                trial_counter
+
+            )
+
+
+
+        elif exp_type == 'toj':
+
+            trial_counter.text = (
+
+                f"Trial {trial_num}/{total_trials}"
+
+            )
+
+            soa = trial
+
+            response, rt = run_toj_trial(
+
+                soa,
+
+                visual_stim,
+
+                sound_stim,
+
+                instructions,
+
+                trial_counter
+
+            )
+
+            trial_type = 'audiovisual'
+
+
+
+        elif exp_type == 'toj_mod':
+
+            trial_counter.text = (
+
+                f"Trial {trial_num}/{total_trials}"
+
+            )
+
+            trial_type, soa, side = trial
+
+            response, rt = run_toj_mod_trial(
+
+                trial_type,
+
+                soa,
+
+                side,
+
+                visual_stim_left,
+
+                visual_stim_right,
+
+                sound_left,
+
+                sound_right,
+
+                instructions,
+
+                trial_counter
+
+            )
+
+
+
+        elif exp_type == 'srt':
+
+            trial_type = trial
+
+            rt, response_status = run_srt_trial(
+
+                trial_type,
+
+                visual_stim,
+
+                sound_stim,
+
+                instructions,
+
+                feedback
+
+            )
+
+            if (
+
+                    rt is not None
+
+                    and response_status == "VALID"
+
+            ):
+
+                best_rt = min(
+
+                    best_rt,
+
+                    rt
+
+                )
+
+                feedback.text = (
+
+                    f"Block {block_number}, "
+
+                    f"Trial {trial_num}/{total_trials}\n"
+
+                    f"Last RT: {rt:.3f}s\n"
+
+                    f"Best RT: {best_rt:.3f}s"
+
+                )
+
+
+            elif response_status == "ANTICIPATION":
+
+                feedback.text = (
+
+                    f"Block {block_number}, "
+
+                    f"Trial {trial_num}/{total_trials}\n"
+
+                    f"Response too fast."
+
+                )
+
+
+            else:
+
+                feedback.text = (
+
+                    f"Block {block_number}, "
+
+                    f"Trial {trial_num}/{total_trials}\n"
+
+                    f"No response detected."
+
+                )
+
+
+
+        elif exp_type == 'srt_mod':
+
+            trial_type = trial
+
+            rt = run_srt_mod_trial(
+
+                trial_type,
+
+                visual_stim_left,
+
+                visual_stim_right,
+
+                sound_left,
+
+                sound_right,
+
+                instructions,
+
+                feedback
+
+            )
+
+            if rt is not None:
+
+                best_rt = min(
+
+                    best_rt,
+
+                    rt
+
+                )
+
+                feedback.text = (
+
+                    f"Block {block_number}, "
+
+                    f"Trial {trial_num}/{total_trials}\n"
+
+                    f"Last RT: {rt:.3f}s\n"
+
+                    f"Best RT: {best_rt:.3f}s"
+
+                )
+
+
+            else:
+
+                feedback.text = (
+
+                    f"Block {block_number}, "
+
+                    f"Trial {trial_num}/{total_trials}\n"
+
+                    f"Too fast or too slow! Invalid response."
+
+                )
         # Save data
         # Get av_sync correction and calculate adjusted RT for cross-modal comparisons
         av_sync = config.get('av_sync_correction', 0.0)
         adjusted_rt = get_adjusted_rt(rt, str(trial_type), av_sync)
 
         trial_data = [
-            participant_id, age, gender, site, block_number, trial_num,
-            trial_type, soa, side, response, rt, adjusted_rt, av_sync, timestamp, exp_type
+            participant_id,
+            age,
+            gender,
+            site,
+            block_number,
+            trial_num,
+            trial_type,
+            soa,
+            side,
+            response,
+            rt,
+            adjusted_rt,
+            av_sync,
+            timestamp,
+            exp_type,
+            response_status
         ]
         with open(data_filename, 'a', newline='') as csvfile:
             csv.writer(csvfile).writerow(trial_data)
@@ -2580,15 +3066,38 @@ def run_experiment_series(config):
 
         print(f"Created data file: {data_filename}")
 
-        # Prepare data file with headers
-        with open(data_filename, 'w', newline='') as csvfile:
-            csvwriter = csv.writer(csvfile)
-            csvwriter.writerow(['Participant_ID', 'Age', 'Gender', 'Site', 'Block_Number', 'Trial_Number',
-                                'Trial_Type', 'SOA', 'Side', 'Response', 'Reaction_Time', 'Adjusted_RT',
-                                'AV_Sync_Correction', 'Timestamp', 'Experiment'])
+        # ==================================================
+        # PREPARE DATA FILE WITH HEADERS
+        # ==================================================
 
-        print(f"Starting {len(config['blocks'])} blocks...")
+        with open(
+                data_filename,
+                'w',
+                newline=''
+        ) as csvfile:
 
+            csvwriter = csv.writer(
+                csvfile
+            )
+
+            csvwriter.writerow([
+                'Participant_ID',
+                'Age',
+                'Gender',
+                'Site',
+                'Block_Number',
+                'Trial_Number',
+                'Trial_Type',
+                'SOA',
+                'Side',
+                'Response',
+                'Reaction_Time',
+                'Adjusted_RT',
+                'AV_Sync_Correction',
+                'Timestamp',
+                'Experiment',
+                'Response_Status'
+            ])
         # Track which between-task video should play next
         transition_video_index = 0
 

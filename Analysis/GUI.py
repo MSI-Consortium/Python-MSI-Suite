@@ -1424,36 +1424,54 @@ class MSIAnalysisGUI(QWidget):
 
         plot_files = []
 
-        # Plot filenames and display names
+        # ==================================================
+        # Available Plot Types
+        # ==================================================
+
         plot_types = [
+
             (
                 "SJ_Raw.png",
                 "SJ Raw"
             ),
+
             (
                 "SJ_Fitted.png",
                 "SJ Fitted"
             ),
+
             (
                 "TOJ_Raw.png",
                 "TOJ Raw"
             ),
+
             (
                 "TOJ_Fitted.png",
                 "TOJ Fitted"
             ),
+
             (
                 "SRT_Histogram.png",
                 "SRT Histogram"
+            ),
+
+            (
+                "SRT_By_Modality.png",
+                "SRT by Modality"
             )
         ]
 
-        # Look through selected participants
+        # ==================================================
+        # Look Through Selected Participants
+        # ==================================================
+
         for file in self.selected_files:
 
             participant_folder_name = (
                 os.path.splitext(
-                    os.path.basename(file)
+                    os.path.basename(
+                        file
+                    )
                 )[0]
             )
 
@@ -1462,16 +1480,20 @@ class MSIAnalysisGUI(QWidget):
                 participant_folder_name
             )
 
-            # Use participant ID for display
+            # Default display name
             participant_display = (
                 participant_folder_name
             )
 
-            # Look up actual Participant_ID
+            # ==================================================
+            # Look Up Actual Participant ID
+            # ==================================================
+
             if hasattr(
                     self,
                     "current_results"
             ):
+
                 matching_rows = (
                     self.current_results[
                         self.current_results[
@@ -1483,31 +1505,44 @@ class MSIAnalysisGUI(QWidget):
 
                 if not matching_rows.empty:
                     participant_display = str(
-                        matching_rows.iloc[0][
+                        matching_rows.iloc[
+                            0
+                        ][
                             "Participant_ID"
                         ]
                     )
 
-            for filename, display_name in plot_types:
+            # ==================================================
+            # Add Existing Plots
+            # ==================================================
+
+            for filename, display_name in (
+                    plot_types
+            ):
 
                 plot_path = os.path.join(
                     participant_folder,
                     filename
                 )
 
-                # Only add plots that actually exist
                 if os.path.exists(
                         plot_path
                 ):
                     plot_files.append({
-                        "path": plot_path,
+                        "path":
+                            plot_path,
+
                         "participant":
                             participant_display,
+
                         "name":
                             display_name
                     })
 
-        # No plots found
+        # ==================================================
+        # No Plots Found
+        # ==================================================
+
         if not plot_files:
             QMessageBox.warning(
                 self,
@@ -1518,7 +1553,10 @@ class MSIAnalysisGUI(QWidget):
 
             return
 
-        # Open viewer
+        # ==================================================
+        # Open Viewer
+        # ==================================================
+
         viewer = PlotViewer(
             plot_files,
             self
@@ -1938,53 +1976,164 @@ class MSIAnalysisGUI(QWidget):
 
             if "SRT_QC_OK" not in self.current_results.columns:
 
-                message = "SRT analysis was not run."
-                title = "SRT Quality Control"
+                message = (
+
+                    "SRT analysis was not run."
+
+                )
+
+                title = (
+
+                    "SRT Quality Control"
+
+                )
+
 
             else:
 
                 qc_status = (
+
                     "PASS"
+
                     if bool(
-                        participant["SRT_QC_OK"]
+
+                        participant[
+
+                            "SRT_QC_OK"
+
+                        ]
+
                     )
+
                     else "FAIL"
+
                 )
 
                 message = (
+
                     f"Participant {participant_id} - SRT QC\n\n"
 
-                    f"Overall SRT QC: {qc_status}\n\n"
+
+                    f"Overall SRT QC: "
+
+                    f"{qc_status}\n\n"
+
 
                     f"Total trials: "
+
                     f"{participant['SRT_Trials']}\n"
 
+
                     f"Valid trials: "
+
                     f"{participant['SRT_Valid_Trials']}\n"
 
+
                     f"Clean trials: "
+
                     f"{participant['SRT_Clean_Trials']}\n"
 
+
                     f"Misses: "
+
                     f"{participant['SRT_Misses']}\n"
 
+
                     f"Anticipations: "
+
                     f"{participant['SRT_Anticipations']}\n\n"
 
-                    f"Mean RT: "
+
+                    f"Overall Mean RT: "
+
                     f"{participant['Mean_Adjusted_RT_ms']:.1f} ms\n"
 
-                    f"Median RT: "
+
+                    f"Overall Median RT: "
+
                     f"{participant['Median_Adjusted_RT_ms']:.1f} ms\n"
 
-                    f"SD: "
+
+                    f"Overall SD: "
+
                     f"{participant['SD_Adjusted_RT_ms']:.1f} ms\n"
 
-                    f"CV: "
-                    f"{participant['CV_Adjusted_RT']:.3f}"
+
+                    f"Overall CV: "
+
+                    f"{participant['CV_Adjusted_RT']:.3f}\n\n"
+
+
+                    f"------------------------------\n"
+
+                    f"RT by Stimulus Modality\n"
+
+                    f"------------------------------\n\n"
+
+
+                    f"Auditory Only\n"
+
+                    f"  n = "
+
+                    f"{int(participant['Audio_N'])}\n"
+
+                    f"  Mean = "
+
+                    f"{participant['Audio_Mean_RT_ms']:.1f} ms\n"
+
+                    f"  Median = "
+
+                    f"{participant['Audio_Median_RT_ms']:.1f} ms\n"
+
+                    f"  SD = "
+
+                    f"{participant['Audio_SD_RT_ms']:.1f} ms\n\n"
+
+
+                    f"Visual Only\n"
+
+                    f"  n = "
+
+                    f"{int(participant['Visual_N'])}\n"
+
+                    f"  Mean = "
+
+                    f"{participant['Visual_Mean_RT_ms']:.1f} ms\n"
+
+                    f"  Median = "
+
+                    f"{participant['Visual_Median_RT_ms']:.1f} ms\n"
+
+                    f"  SD = "
+
+                    f"{participant['Visual_SD_RT_ms']:.1f} ms\n\n"
+
+
+                    f"Audiovisual\n"
+
+                    f"  n = "
+
+                    f"{int(participant['Audiovisual_N'])}\n"
+
+                    f"  Mean = "
+
+                    f"{participant['Audiovisual_Mean_RT_ms']:.1f} ms\n"
+
+                    f"  Median = "
+
+                    f"{participant['Audiovisual_Median_RT_ms']:.1f} ms\n"
+
+                    f"  SD = "
+
+                    f"{participant['Audiovisual_SD_RT_ms']:.1f} ms"
+
                 )
 
-                title = "SRT Quality Control"
+                title = (
+
+                    "SRT Quality Control"
+
+                )
 
         # --------------------------------
         # Overall column

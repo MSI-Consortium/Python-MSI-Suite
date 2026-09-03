@@ -24,21 +24,27 @@ def generate_pdf_report(
     qc_settings
 ):
     """
-    Generate one PDF report containing:
+    Generate the MSI Analysis PDF report.
 
     Page 1:
         - Report information
         - QC settings
-        - Explanation of QC measures
+        - QC explanations
 
     Page 2:
         - Master Results
+        - Participant summary
+        - SJ results
+        - TOJ results
+        - Overall SRT results
+        - SRT results by stimulus modality
 
     Remaining pages:
         - One page per participant
         - Participant information
         - SJ / TOJ / SRT numerical results
-        - Available participant plots
+        - Auditory / Visual / Audiovisual SRT results
+        - Available plots
     """
 
     # ==================================================
@@ -61,9 +67,9 @@ def generate_pdf_report(
 
     styles = getSampleStyleSheet()
 
-    # -------------------------
-    # Master Results headings
-    # -------------------------
+    # ==================================================
+    # CUSTOM STYLES
+    # ==================================================
 
     master_section_style = styles["Heading3"].clone(
         "MasterSection"
@@ -73,10 +79,6 @@ def generate_pdf_report(
     master_section_style.leading = 13
     master_section_style.spaceAfter = 4
 
-    # -------------------------
-    # Plot headings
-    # -------------------------
-
     plot_title_style = styles["Heading4"].clone(
         "PlotTitle"
     )
@@ -84,10 +86,6 @@ def generate_pdf_report(
     plot_title_style.fontSize = 8
     plot_title_style.leading = 9
     plot_title_style.spaceAfter = 1
-
-    # -------------------------
-    # Small table text
-    # -------------------------
 
     small_text_style = styles["Normal"].clone(
         "SmallTableText"
@@ -97,6 +95,286 @@ def generate_pdf_report(
     small_text_style.leading = 8.5
 
     story = []
+
+    # ==================================================
+    # HELPER FUNCTIONS
+    # ==================================================
+
+    def format_value(
+        row,
+        column,
+        decimals=2,
+        suffix=""
+    ):
+        """
+        Safely format a value from a participant row.
+        """
+
+        if column not in row.index:
+            return "N/A"
+
+        value = row[column]
+
+        if pd.isna(value):
+            return "N/A"
+
+        try:
+            return (
+                f"{float(value):.{decimals}f}"
+                f"{suffix}"
+            )
+
+        except (
+            ValueError,
+            TypeError
+        ):
+            return str(value)
+
+    def qc_status(
+        row,
+        column
+    ):
+        """
+        Convert a boolean QC variable to PASS / REVIEW.
+        """
+
+        if column not in row.index:
+            return "N/A"
+
+        value = row[column]
+
+        if pd.isna(value):
+            return "N/A"
+
+        return (
+            "PASS"
+            if bool(value)
+            else "REVIEW"
+        )
+
+    def create_results_table(
+        title,
+        columns,
+        display_names,
+        font_size=8
+    ):
+        """
+        Create one of the compact Master Results tables.
+        """
+
+        available_columns = [
+            column
+            for column in columns
+            if column in results.columns
+        ]
+
+        if not available_columns:
+            return Spacer(1, 0)
+
+        title_paragraph = Paragraph(
+            title,
+            master_section_style
+        )
+
+        # --------------------------------
+        # Header
+        # --------------------------------
+
+        table_data = [[
+            display_names.get(
+                column,
+                column
+            )
+            for column in available_columns
+        ]]
+
+        # --------------------------------
+        # Participant rows
+        # --------------------------------
+
+        for _, row in results.iterrows():
+
+            table_row = []
+
+            for column in available_columns:
+
+                value = row[column]
+
+                # QC columns
+                if column.endswith("_OK"):
+
+                    if pd.isna(value):
+                        value = "N/A"
+
+                    else:
+                        value = (
+                            "PASS"
+                            if bool(value)
+                            else "REVIEW"
+                        )
+
+                # Numeric columns
+                elif isinstance(
+                    value,
+                    (float, int)
+                ):
+
+                    if pd.isna(value):
+                        value = "N/A"
+
+                    elif isinstance(
+                        value,
+                        float
+                    ):
+                        value = f"{value:.2f}"
+
+                    else:
+                        value = str(value)
+
+                else:
+                    value = str(value)
+
+                table_row.append(
+                    value
+                )
+
+            table_data.append(
+                table_row
+            )
+
+        table = Table(
+            table_data,
+            repeatRows=1
+        )
+
+        table.setStyle(
+            TableStyle([
+
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold"
+                ),
+
+                (
+                    "FONTSIZE",
+                    (0, 0),
+                    (-1, -1),
+                    font_size
+                ),
+
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.25,
+                    colors.grey
+                ),
+
+                (
+                    "ALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "CENTER"
+                ),
+
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3
+                ),
+
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3
+                ),
+
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3
+                ),
+
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    3
+                ),
+            ])
+        )
+
+        container = Table(
+            [
+                [
+                    title_paragraph
+                ],
+                [
+                    table
+                ]
+            ]
+        )
+
+        container.setStyle(
+            TableStyle([
+
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "TOP"
+                ),
+
+                (
+                    "LEFTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    0
+                ),
+
+                (
+                    "RIGHTPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    0
+                ),
+
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    1
+                ),
+
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    1
+                ),
+            ])
+        )
+
+        return container
 
     # ==================================================
     # PAGE 1
@@ -167,30 +445,22 @@ def generate_pdf_report(
 
         [
             "Minimum response proportion",
-            (
-                f"{qc_settings['min_response_proportion']:.2f}"
-            )
+            f"{qc_settings['min_response_proportion']:.2f}"
         ],
 
         [
             "Maximum response proportion",
-            (
-                f"{qc_settings['max_response_proportion']:.2f}"
-            )
+            f"{qc_settings['max_response_proportion']:.2f}"
         ],
 
         [
             "Maximum SJ sigma",
-            (
-                f"{qc_settings['max_sigma_ms']} ms"
-            )
+            f"{qc_settings['max_sigma_ms']} ms"
         ],
 
         [
             "Maximum TOJ slope",
-            (
-                f"{qc_settings['max_slope_ms']} ms"
-            )
+            f"{qc_settings['max_slope_ms']} ms"
         ],
 
         [
@@ -200,9 +470,7 @@ def generate_pdf_report(
 
         [
             "Anticipation threshold",
-            (
-                f"{qc_settings['min_rt_ms']} ms"
-            )
+            f"{qc_settings['min_rt_ms']} ms"
         ],
 
         [
@@ -226,14 +494,16 @@ def generate_pdf_report(
         [
             "Minimum mean RT",
             (
-                f"{qc_settings['min_mean_rt_sec']:.2f} sec"
+                f"{qc_settings['min_mean_rt_sec']:.2f} "
+                f"sec"
             )
         ],
 
         [
             "Maximum mean RT",
             (
-                f"{qc_settings['max_mean_rt_sec']:.2f} sec"
+                f"{qc_settings['max_mean_rt_sec']:.2f} "
+                f"sec"
             )
         ],
     ]
@@ -363,10 +633,10 @@ def generate_pdf_report(
         [
             "Catch Trials",
             (
-                "Did the participant correctly identify at least 8 of the "
-                "10 easy 1000-ms catch trials in each SJ and TOJ task? "
-                "Catch trials are used as an attention/task-comprehension "
-                "quality check and are excluded from psychometric fitting."
+                "Did the participant correctly identify at least 8 "
+                "of the 10 easy 1000-ms catch trials in each SJ and "
+                "TOJ task? Catch trials are excluded from "
+                "psychometric fitting."
             )
         ],
 
@@ -403,16 +673,26 @@ def generate_pdf_report(
         ],
 
         [
+            "SRT Modality",
+            (
+                "How fast did the participant respond separately to "
+                "auditory-only, visual-only, and audiovisual stimuli? "
+                "These are descriptive RT measures and do not add a "
+                "new QC criterion."
+            )
+        ],
+
+        [
             "Overall QC",
             (
                 "Did the participant pass all applicable QC checks? "
-                "REVIEW means that at least one applicable criterion "
-                "was not met and should be inspected."
+                "REVIEW means at least one applicable criterion was "
+                "not met and should be inspected."
             )
         ],
     ]
 
-    # Convert explanation text to Paragraphs so it wraps
+    # Convert text to Paragraphs for wrapping
     for row_index in range(
         len(qc_explanation_data)
     ):
@@ -594,15 +874,13 @@ def generate_pdf_report(
         qc_overview
     )
 
-    # Page 2
+    # ==================================================
+    # PAGE 2
+    # ==================================================
+
     story.append(
         PageBreak()
     )
-
-    # ==================================================
-    # PAGE 2
-    # MASTER RESULTS
-    # ==================================================
 
     story.append(
         Paragraph(
@@ -614,240 +892,12 @@ def generate_pdf_report(
     story.append(
         Spacer(
             1,
-            0.08 * inch
+            0.05 * inch
         )
     )
 
     # ==================================================
-    # MASTER RESULTS HELPER
-    # ==================================================
-
-    def create_results_table(
-        title,
-        columns,
-        display_names
-    ):
-
-        available_columns = [
-            column
-            for column in columns
-            if column in results.columns
-        ]
-
-        if not available_columns:
-
-            return Spacer(
-                1,
-                0
-            )
-
-        title_paragraph = Paragraph(
-            title,
-            master_section_style
-        )
-
-        table_data = [[
-            display_names.get(
-                column,
-                column
-            )
-            for column in available_columns
-        ]]
-
-        for _, row in results.iterrows():
-
-            table_row = []
-
-            for column in available_columns:
-
-                value = row[column]
-
-                # -------------------------
-                # QC values
-                # -------------------------
-
-                if column.endswith("_OK"):
-
-                    if pd.isna(value):
-
-                        value = "N/A"
-
-                    else:
-
-                        value = (
-                            "PASS"
-                            if bool(value)
-                            else "REVIEW"
-                        )
-
-                # -------------------------
-                # Floating point values
-                # -------------------------
-
-                elif isinstance(
-                    value,
-                    float
-                ):
-
-                    if pd.isna(value):
-
-                        value = "N/A"
-
-                    else:
-
-                        value = (
-                            f"{value:.2f}"
-                        )
-
-                else:
-
-                    value = str(value)
-
-                table_row.append(
-                    value
-                )
-
-            table_data.append(
-                table_row
-            )
-
-        table = Table(
-            table_data,
-            repeatRows=1
-        )
-
-        table.setStyle(
-            TableStyle([
-
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.lightgrey
-                ),
-
-                (
-                    "FONTNAME",
-                    (0, 0),
-                    (-1, 0),
-                    "Helvetica-Bold"
-                ),
-
-                (
-                    "FONTSIZE",
-                    (0, 0),
-                    (-1, -1),
-                    8
-                ),
-
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.25,
-                    colors.grey
-                ),
-
-                (
-                    "ALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "CENTER"
-                ),
-
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE"
-                ),
-
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4
-                ),
-
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4
-                ),
-
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4
-                ),
-
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    4
-                ),
-            ])
-        )
-
-        container = Table(
-            [
-                [
-                    title_paragraph
-                ],
-
-                [
-                    table
-                ]
-            ]
-        )
-
-        container.setStyle(
-            TableStyle([
-
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "TOP"
-                ),
-
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    0
-                ),
-
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    0
-                ),
-
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    2
-                ),
-
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    2
-                ),
-            ])
-        )
-
-        return container
-
-    # ==================================================
-    # PARTICIPANT SUMMARY MASTER TABLE
+    # PARTICIPANT SUMMARY
     # ==================================================
 
     participant_table = create_results_table(
@@ -871,7 +921,7 @@ def generate_pdf_report(
     )
 
     # ==================================================
-    # SJ MASTER TABLE
+    # SJ MASTER RESULTS
     # ==================================================
 
     sj_table = create_results_table(
@@ -906,6 +956,12 @@ def generate_pdf_report(
             "SJ_R2":
                 "R²",
 
+            "SJ_Catch_Correct":
+                "Catch /10",
+
+            "SJ_Catch_OK":
+                "Catch QC",
+
             "SJ_Fit_OK":
                 "Fit",
 
@@ -913,18 +969,14 @@ def generate_pdf_report(
                 "Range",
 
             "SJ_Response_Bias_OK":
-                "Bias",
+                "Bias"
+        },
 
-            "SJ_Catch_Correct":
-                "Catch /10",
-
-            "SJ_Catch_OK":
-                "Catch QC",
-        }
+        font_size=7
     )
 
     # ==================================================
-    # TOJ MASTER TABLE
+    # TOJ MASTER RESULTS
     # ==================================================
 
     toj_table = create_results_table(
@@ -959,6 +1011,12 @@ def generate_pdf_report(
             "TOJ_R2":
                 "R²",
 
+            "TOJ_Catch_Correct":
+                "Catch /10",
+
+            "TOJ_Catch_OK":
+                "Catch QC",
+
             "TOJ_Fit_OK":
                 "Fit",
 
@@ -966,18 +1024,14 @@ def generate_pdf_report(
                 "Range",
 
             "TOJ_Response_Bias_OK":
-                "Bias",
+                "Bias"
+        },
 
-            "TOJ_Catch_Correct":
-                "Catch /10",
-
-            "TOJ_Catch_OK":
-                "Catch QC",
-        }
+        font_size=7
     )
 
     # ==================================================
-    # SRT MASTER TABLE
+    # OVERALL SRT MASTER RESULTS
     # ==================================================
 
     srt_table = create_results_table(
@@ -1022,11 +1076,59 @@ def generate_pdf_report(
 
             "SRT_QC_OK":
                 "QC"
-        }
+        },
+
+        font_size=7
     )
 
     # ==================================================
-    # ARRANGE MASTER RESULTS ON ONE PAGE
+    # SRT BY MODALITY MASTER RESULTS
+    # ==================================================
+
+    srt_modality_table = create_results_table(
+        "SRT by Stimulus Modality",
+
+        [
+            "Participant_ID",
+
+            "Audio_N",
+            "Audio_Mean_RT_ms",
+
+            "Visual_N",
+            "Visual_Mean_RT_ms",
+
+            "Audiovisual_N",
+            "Audiovisual_Mean_RT_ms"
+        ],
+
+        {
+            "Participant_ID":
+                "ID",
+
+            "Audio_N":
+                "A n",
+
+            "Audio_Mean_RT_ms":
+                "A Mean",
+
+            "Visual_N":
+                "V n",
+
+            "Visual_Mean_RT_ms":
+                "V Mean",
+
+            "Audiovisual_N":
+                "AV n",
+
+            "Audiovisual_Mean_RT_ms":
+                "AV Mean"
+        },
+
+        font_size=7
+    )
+
+    # ==================================================
+    # MASTER RESULTS GRID
     # ==================================================
 
     master_grid = Table(
@@ -1062,28 +1164,28 @@ def generate_pdf_report(
                 "LEFTPADDING",
                 (0, 0),
                 (-1, -1),
-                5
+                4
             ),
 
             (
                 "RIGHTPADDING",
                 (0, 0),
                 (-1, -1),
-                5
+                4
             ),
 
             (
                 "TOPPADDING",
                 (0, 0),
                 (-1, -1),
-                4
+                2
             ),
 
             (
                 "BOTTOMPADDING",
                 (0, 0),
                 (-1, -1),
-                4
+                2
             ),
         ])
     )
@@ -1092,70 +1194,28 @@ def generate_pdf_report(
         master_grid
     )
 
-    # Participant pages start next
+    # --------------------------------
+    # Modality table below grid
+    # --------------------------------
+
     story.append(
-        PageBreak()
+        Spacer(
+            1,
+            0.05 * inch
+        )
+    )
+
+    story.append(
+        srt_modality_table
     )
 
     # ==================================================
-    # PARTICIPANT REPORT HELPERS
+    # PARTICIPANT PAGES
     # ==================================================
 
-    def format_value(
-        row,
-        column,
-        decimals=2,
-        suffix=""
-    ):
-
-        if column not in row.index:
-
-            return "N/A"
-
-        value = row[column]
-
-        if pd.isna(value):
-
-            return "N/A"
-
-        try:
-
-            return (
-                f"{float(value):.{decimals}f}"
-                f"{suffix}"
-            )
-
-        except (
-            ValueError,
-            TypeError
-        ):
-
-            return str(value)
-
-    def qc_status(
-        row,
-        column
-    ):
-
-        if column not in row.index:
-
-            return "N/A"
-
-        value = row[column]
-
-        if pd.isna(value):
-
-            return "N/A"
-
-        return (
-            "PASS"
-            if bool(value)
-            else "REVIEW"
-        )
-
-    # ==================================================
-    # INDIVIDUAL PARTICIPANT REPORTS
-    # ==================================================
+    story.append(
+        PageBreak()
+    )
 
     for participant_index, (_, row) in enumerate(
         results.iterrows()
@@ -1214,7 +1274,7 @@ def generate_pdf_report(
         story.append(
             Spacer(
                 1,
-                0.08 * inch
+                0.06 * inch
             )
         )
 
@@ -1229,14 +1289,14 @@ def generate_pdf_report(
                 "Measure 2",
                 "Measure 3",
                 "R² / CV",
-                "Catch",
-                "Fit QC"
+                "Catch / Detail",
+                "QC"
             ]
         ]
 
-        # -------------------------
+        # ==================================================
         # SJ
-        # -------------------------
+        # ==================================================
 
         if "SJ_PSS_ms" in results.columns:
 
@@ -1278,17 +1338,18 @@ def generate_pdf_report(
                         decimals=3
                     )
                 ),
+
                 (
-                        format_value(
-                            row,
-                            "SJ_Catch_Correct",
-                            decimals=0
-                        )
-                        + "/10 "
-                        + qc_status(
-                    row,
-                    "SJ_Catch_OK"
-                )
+                    format_value(
+                        row,
+                        "SJ_Catch_Correct",
+                        decimals=0
+                    )
+                    + "/10 "
+                    + qc_status(
+                        row,
+                        "SJ_Catch_OK"
+                    )
                 ),
 
                 qc_status(
@@ -1297,9 +1358,9 @@ def generate_pdf_report(
                 )
             ])
 
-        # -------------------------
+        # ==================================================
         # TOJ
-        # -------------------------
+        # ==================================================
 
         if "TOJ_PSS_ms" in results.columns:
 
@@ -1340,17 +1401,18 @@ def generate_pdf_report(
                         decimals=3
                     )
                 ),
+
                 (
-                        format_value(
-                            row,
-                            "TOJ_Catch_Correct",
-                            decimals=0
-                        )
-                        + "/10 "
-                        + qc_status(
-                    row,
-                    "TOJ_Catch_OK"
-                )
+                    format_value(
+                        row,
+                        "TOJ_Catch_Correct",
+                        decimals=0
+                    )
+                    + "/10 "
+                    + qc_status(
+                        row,
+                        "TOJ_Catch_OK"
+                    )
                 ),
 
                 qc_status(
@@ -1359,9 +1421,9 @@ def generate_pdf_report(
                 )
             ])
 
-        # -------------------------
-        # SRT
-        # -------------------------
+        # ==================================================
+        # OVERALL SRT
+        # ==================================================
 
         if "Mean_Adjusted_RT_ms" in results.columns:
 
@@ -1404,23 +1466,94 @@ def generate_pdf_report(
                     )
                 ),
 
+                (
+                    "Valid: "
+                    + format_value(
+                        row,
+                        "SRT_Valid_Trials",
+                        decimals=0
+                    )
+                ),
+
                 qc_status(
                     row,
                     "SRT_QC_OK"
                 )
             ])
 
+        # ==================================================
+        # SRT BY MODALITY
+        # ==================================================
+
+        if "Audio_Mean_RT_ms" in results.columns:
+
+            participant_results_data.append([
+                "SRT Modality",
+
+                (
+                    "Audio: "
+                    + format_value(
+                        row,
+                        "Audio_Mean_RT_ms",
+                        suffix=" ms"
+                    )
+                ),
+
+                (
+                    "Visual: "
+                    + format_value(
+                        row,
+                        "Visual_Mean_RT_ms",
+                        suffix=" ms"
+                    )
+                ),
+
+                (
+                    "AV: "
+                    + format_value(
+                        row,
+                        "Audiovisual_Mean_RT_ms",
+                        suffix=" ms"
+                    )
+                ),
+
+                "",
+
+                (
+                    "n = "
+                    + format_value(
+                        row,
+                        "Audio_N",
+                        decimals=0
+                    )
+                    + " / "
+                    + format_value(
+                        row,
+                        "Visual_N",
+                        decimals=0
+                    )
+                    + " / "
+                    + format_value(
+                        row,
+                        "Audiovisual_N",
+                        decimals=0
+                    )
+                ),
+
+                ""
+            ])
+
         participant_results_table = Table(
             participant_results_data,
 
             colWidths=[
-                0.50 * inch,  # Task
-                1.55 * inch,  # Measure 1
-                1.55 * inch,  # Measure 2
-                1.55 * inch,  # Measure 3
-                1.10 * inch,  # R2 / CV
-                1.20 * inch,  # Catch
-                0.75 * inch  # QC
+                0.70 * inch,
+                1.45 * inch,
+                1.45 * inch,
+                1.45 * inch,
+                1.05 * inch,
+                1.45 * inch,
+                0.75 * inch
             ]
         )
 
@@ -1452,7 +1585,7 @@ def generate_pdf_report(
                     "FONTSIZE",
                     (0, 0),
                     (-1, -1),
-                    8
+                    7
                 ),
 
                 (
@@ -1481,14 +1614,14 @@ def generate_pdf_report(
                     "TOPPADDING",
                     (0, 0),
                     (-1, -1),
-                    4
+                    3
                 ),
 
                 (
                     "BOTTOMPADDING",
                     (0, 0),
                     (-1, -1),
-                    4
+                    3
                 ),
             ])
         )
@@ -1500,7 +1633,7 @@ def generate_pdf_report(
         story.append(
             Spacer(
                 1,
-                0.06 * inch
+                0.04 * inch
             )
         )
 
@@ -1509,6 +1642,7 @@ def generate_pdf_report(
         # ==================================================
 
         plot_specs = [
+
             (
                 "SJ_Raw.png",
                 "SJ Raw"
@@ -1532,14 +1666,19 @@ def generate_pdf_report(
             (
                 "TOJ_Fitted.png",
                 "TOJ Fitted"
+            ),
+
+            (
+                "SRT_By_Modality.png",
+                "SRT by Modality"
             )
         ]
 
         plot_items = []
 
-        # -------------------------
-        # Load plots
-        # -------------------------
+        # ==================================================
+        # LOAD AVAILABLE PLOTS
+        # ==================================================
 
         for filename, plot_title in plot_specs:
 
@@ -1551,13 +1690,12 @@ def generate_pdf_report(
             if not os.path.exists(
                 plot_path
             ):
-
                 continue
 
             plot_image = Image(
                 plot_path,
                 width=2.8 * inch,
-                height=1.75 * inch
+                height=1.70 * inch
             )
 
             plot_container = Table(
@@ -1627,18 +1765,20 @@ def generate_pdf_report(
             )
 
         # ==================================================
-        # ARRANGE PLOTS
+        # ARRANGE PLOTS 3 x 2
         # ==================================================
 
         plot_rows = []
 
         if plot_items:
 
-            # First row:
-            # SJ Raw / SJ Fitted / SRT
-            first_row = plot_items[:3]
+            first_row = (
+                plot_items[:3]
+            )
 
-            while len(first_row) < 3:
+            while len(
+                first_row
+            ) < 3:
 
                 first_row.append(
                     Spacer(
@@ -1651,15 +1791,17 @@ def generate_pdf_report(
                 first_row
             )
 
-            # Second row:
-            # TOJ Raw / TOJ Fitted
-            remaining = plot_items[3:]
+            second_row = (
+                plot_items[3:6]
+            )
 
-            if remaining:
+            if second_row:
 
-                while len(remaining) < 3:
+                while len(
+                    second_row
+                ) < 3:
 
-                    remaining.append(
+                    second_row.append(
                         Spacer(
                             1,
                             0
@@ -1667,7 +1809,7 @@ def generate_pdf_report(
                     )
 
                 plot_rows.append(
-                    remaining
+                    second_row
                 )
 
         if plot_rows:
@@ -1717,14 +1859,14 @@ def generate_pdf_report(
                         "TOPPADDING",
                         (0, 0),
                         (-1, -1),
-                        2
+                        1
                     ),
 
                     (
                         "BOTTOMPADDING",
                         (0, 0),
                         (-1, -1),
-                        2
+                        1
                     ),
                 ])
             )
