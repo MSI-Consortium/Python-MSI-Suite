@@ -80,8 +80,14 @@ def analyze_participant(
     gender = df["Gender"].iloc[0]
     site = df["Site"].iloc[0]
 
-    ####SJ Analysis
-    if run_sj:
+    # ==================================================
+    # SJ Analysis
+    # ==================================================
+
+    sj_available = not sj.empty
+
+    if run_sj and sj_available:
+
         sj_results = analyze_sj(
             sj,
             participant_folder,
@@ -90,11 +96,28 @@ def analyze_participant(
             min_response_proportion=min_response_proportion,
             max_response_proportion=max_response_proportion
         )
-    else:
+
+    elif run_sj and not sj_available:
+
+        print(
+            "SJ selected, but no SJ trials were found. "
+            "Skipping SJ analysis."
+        )
+
         sj_results = {}
 
-    #### TOJ Analysis
-    if run_toj:
+    else:
+
+        sj_results = {}
+
+    # ==================================================
+    # TOJ Analysis
+    # ==================================================
+
+    toj_available = not toj.empty
+
+    if run_toj and toj_available:
+
         toj_results = analyze_toj(
             toj,
             participant_folder,
@@ -103,11 +126,28 @@ def analyze_participant(
             min_response_proportion=min_response_proportion,
             max_response_proportion=max_response_proportion
         )
-    else:
+
+    elif run_toj and not toj_available:
+
+        print(
+            "TOJ selected, but no TOJ trials were found. "
+            "Skipping TOJ analysis."
+        )
+
         toj_results = {}
 
-    #### SRT Analysis
-    if run_srt:
+    else:
+
+        toj_results = {}
+
+    # ==================================================
+    # SRT Analysis
+    # ==================================================
+
+    srt_available = not srt.empty
+
+    if run_srt and srt_available:
+
         srt_results = analyze_srt(
             srt,
             participant_folder,
@@ -117,13 +157,29 @@ def analyze_participant(
             min_mean_rt_sec=min_mean_rt_sec,
             max_mean_rt_sec=max_mean_rt_sec
         )
-    else:
+
+    elif run_srt and not srt_available:
+
+        print(
+            "SRT selected, but no SRT trials were found. "
+            "Skipping SRT analysis."
+        )
+
         srt_results = {}
 
+    else:
+
+        srt_results = {}
+
+    # ==================================================
     # Overall Participant Quality Flag
+    # ==================================================
+
     qc_checks = []
 
-    if run_sj:
+    # Only include SJ QC if SJ was selected
+    # AND this participant actually had SJ trials.
+    if run_sj and sj_available:
         qc_checks.extend([
             sj_results["SJ_Fit_OK"],
             sj_results["SJ_Response_Range_OK"],
@@ -131,7 +187,9 @@ def analyze_participant(
             sj_results["SJ_Catch_OK"]
         ])
 
-    if run_toj:
+    # Only include TOJ QC if TOJ was selected
+    # AND this participant actually had TOJ trials.
+    if run_toj and toj_available:
         qc_checks.extend([
             toj_results["TOJ_Fit_OK"],
             toj_results["TOJ_Response_Range_OK"],
@@ -139,12 +197,28 @@ def analyze_participant(
             toj_results["TOJ_Catch_OK"]
         ])
 
-    if run_srt:
+    # Only include SRT QC if SRT was selected
+    # AND this participant actually had SRT trials.
+    if run_srt and srt_available:
         qc_checks.append(
             srt_results["SRT_QC_OK"]
         )
 
-    Participant_OK = all(qc_checks)
+    # Participant passes if all analyses that were
+    # actually available and analyzed passed QC.
+    #
+    # If no selected analyses were available,
+    # leave Participant_OK undefined rather than
+    # incorrectly calling the participant a PASS.
+    if qc_checks:
+
+        Participant_OK = all(
+            qc_checks
+        )
+
+    else:
+
+        Participant_OK = None
 
     ####################################################
     # Add participant to master results
