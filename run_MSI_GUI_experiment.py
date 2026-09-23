@@ -2664,27 +2664,6 @@ def run_block(block_config, data_filename, config):
         timestamp = core.getTime()
 
         if exp_type == 'sj':
-            trial_counter.text = f"Trial {trial_num}/{total_trials}"
-            soa = trial
-            response, rt = run_sj_trial(soa, visual_stim, sound_stim, instructions, trial_counter)
-            trial_type = 'audiovisual'
-        elif exp_type == 'sj_mod':
-            trial_counter.text = f"Trial {trial_num}/{total_trials}"
-            trial_type, soa, side = trial
-            response, rt = run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left,
-                                            sound_right, instructions, trial_counter)
-        elif exp_type == 'toj':
-            trial_counter.text = f"Trial {trial_num}/{total_trials}"
-            soa = trial
-            response, rt = run_toj_trial(soa, visual_stim, sound_stim, instructions, trial_counter)
-            trial_type = 'audiovisual'
-        elif exp_type == 'toj_mod':
-            trial_counter.text = f"Trial {trial_num}/{total_trials}"
-            trial_type, soa, side = trial
-            response, rt = run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left,
-                                             sound_right, instructions, trial_counter)
-
-        if exp_type == 'sj':
 
             trial_counter.text = (
 
