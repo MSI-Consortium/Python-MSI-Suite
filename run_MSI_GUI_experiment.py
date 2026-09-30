@@ -2663,6 +2663,7 @@ def run_block(block_config, data_filename, config):
 
         timestamp = core.getTime()
 
+
         if exp_type == 'sj':
 
             trial_counter.text = (
