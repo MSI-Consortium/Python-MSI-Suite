@@ -37,6 +37,13 @@ class BlockConfig(QGroupBox):
         self.left_visual_green.hide()
         layout.addRow(self.left_visual_green)
 
+        # Modality selection for SJ_Mod and TOJ_Mod only
+        self.modality_mode = QComboBox()
+        self.modality_mode.addItems(['All', 'Visual Only', 'Auditory Only'])
+        self.modality_mode.hide()
+        self.modality_mode.currentTextChanged.connect(self.update_estimates)
+        layout.addRow('Modality:', self.modality_mode)
+
         self.total_trials_label = QLabel('Total trials: 0')
         layout.addRow(self.total_trials_label)
 
@@ -49,6 +56,7 @@ class BlockConfig(QGroupBox):
     def on_experiment_change(self, exp_type):
         self.left_audio_high.setVisible(exp_type == 'SRT_Mod')
         self.left_visual_green.setVisible(exp_type == 'SRT_Mod')
+        self.modality_mode.setVisible(exp_type in ['SJ_Mod', 'TOJ_Mod'])
         self.update_estimates()
 
     def update_estimates(self):
@@ -75,10 +83,26 @@ class BlockConfig(QGroupBox):
             total_trials = trials_per_condition * 9  # 9 trial types
             estimated_time = total_trials * (1.5 + 0.05)  # 1-2s ITI (avg 1.5s) + 50ms stimulus
         elif exp_type == 'SJ_Mod':
-            total_trials = trials_per_condition * 9 * 6  # 9 SOAs, 6 conditions
+            # Same 50/50 synchrony rule as standard SJ:
+            # 8 nonzero SOAs x N repetitions, plus an equal number of 0-ms trials.
+            # All = 3 modalities x 2 sides = 6 conditions.
+            # Visual Only or Auditory Only = 1 modality x 2 sides = 2 conditions.
+            modality_mode = self.modality_mode.currentText()
+            if modality_mode == 'Visual Only':
+                total_trials = 12 * trials_per_condition * 2 + 10  # +10 catch trials at +/-1000 ms
+            elif modality_mode == 'Auditory Only':
+                total_trials = 8 * trials_per_condition * 2 + 10   # +10 catch trials at +/-1000 ms
+            else:
+                total_trials = 8 * trials_per_condition * 2 * 3 + 30  # +10 catch trials per modality
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
         elif exp_type == 'TOJ_Mod':
-            total_trials = trials_per_condition * 9 * 6  # 9 SOAs, 6 conditions
+            modality_mode = self.modality_mode.currentText()
+            if modality_mode == 'Visual Only':
+                total_trials = trials_per_condition * 13 + 10  # +10 visual catch trials
+            elif modality_mode == 'Auditory Only':
+                total_trials = trials_per_condition * 9 + 10   # +10 auditory catch trials
+            else:
+                total_trials = trials_per_condition * 9 * 3 + 30  # +10 catch trials per modality
             estimated_time = total_trials * (2 + 0.05)  # 2s ITI + 50ms stimulus
 
         self.total_trials_label.setText(f'Total trials: {total_trials}')
@@ -96,6 +120,9 @@ class BlockConfig(QGroupBox):
         if self.exp_type.currentText() == 'SRT_Mod':
             config['left_audio_high'] = self.left_audio_high.isChecked()
             config['left_visual_green'] = self.left_visual_green.isChecked()
+
+        if self.exp_type.currentText() in ['SJ_Mod', 'TOJ_Mod']:
+            config['modality_mode'] = self.modality_mode.currentText()
 
         return config
 
@@ -599,6 +626,7 @@ class ExperimentConfigApp(QWidget):
         block.exp_type.currentTextChanged.connect(self.mark_as_changed)
         block.left_audio_high.stateChanged.connect(self.mark_as_changed)
         block.left_visual_green.stateChanged.connect(self.mark_as_changed)
+        block.modality_mode.currentTextChanged.connect(self.mark_as_changed)
 
         if block_config:
             block.exp_type.setCurrentText(block_config.get('experiment', 'SJ'))
@@ -606,6 +634,8 @@ class ExperimentConfigApp(QWidget):
             if block_config.get('experiment') == 'SRT_Mod':
                 block.left_audio_high.setChecked(block_config.get('left_audio_high', False))
                 block.left_visual_green.setChecked(block_config.get('left_visual_green', False))
+            if block_config.get('experiment') in ['SJ_Mod', 'TOJ_Mod']:
+                block.modality_mode.setCurrentText(block_config.get('modality_mode', 'All'))
 
         self.blocks.append(block)
         self.blocks_layout.addWidget(block)
@@ -760,23 +790,16 @@ class ExperimentConfigApp(QWidget):
             return None
 
     def validate_between_task_video(self):
+        """Validate break videos needed between every pair of blocks.
+
+        Video 1 is used for the first transition. If there are two or more
+        transitions, Video 2 is also required. The runner alternates the two
+        videos for any additional transitions.
         """
-        Verify that enough valid videos have been selected for
-        all transitions between different tasks.
-        """
 
-        experiment_types = [
-            block.exp_type.currentText().lower()
-            for block in self.blocks
-        ]
+        transition_count = max(0, len(self.blocks) - 1)
 
-        # Count actual transitions between different tasks
-        transition_count = sum(
-            experiment_types[i] != experiment_types[i + 1]
-            for i in range(len(experiment_types) - 1)
-        )
-
-        # No task transitions = no videos needed
+        # One block has no between-block transition.
         if transition_count == 0:
             return True
 
@@ -793,19 +816,21 @@ class ExperimentConfigApp(QWidget):
             '.webm'
         )
 
-        # Validate only the videos actually needed
-        for i in range(transition_count):
+        # One transition needs Video 1. Two or more transitions need both
+        # videos because the runner alternates Video 1 / Video 2.
+        videos_required = 1 if transition_count == 1 else 2
 
-            if i >= len(video_paths) or not video_paths[i]:
+        for i in range(videos_required):
+            video_path = video_paths[i]
+
+            if not video_path:
                 QMessageBox.warning(
                     self,
-                    "Between-Task Video Required",
+                    "Between-Block Video Required",
                     f"Break Video {i + 1} has not been selected.\n\n"
-                    "Please select a video before starting the experiment."
+                    "A break video is required between every block."
                 )
                 return False
-
-            video_path = video_paths[i]
 
             if not os.path.isfile(video_path):
                 QMessageBox.warning(

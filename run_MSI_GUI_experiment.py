@@ -1021,9 +1021,15 @@ def play_between_task_video(video_path):
             movie.draw()
             win.flip()
 
-            # Participant cannot skip the video.
-            # ESCAPE remains available for the researcher.
-            keys = event.getKeys(keyList=['escape'])
+            # Participant-facing controls do not skip the video.
+            # Hidden operator control: F8 skips the current break video.
+            # ESCAPE remains the emergency experiment-termination key.
+            keys = event.getKeys(keyList=['f8', 'escape'])
+
+            if 'f8' in keys:
+                print("Break video skipped by operator (F8).")
+                movie.stop()
+                break
 
             if 'escape' in keys:
                 movie.stop()
@@ -2491,6 +2497,18 @@ def run_block(block_config, data_filename, config):
     trials_per_condition = block_config['trials_per_condition']
     block_number = block_config['block_number']
 
+    def split_trials_between_sides(cond, soa, n_trials):
+        """Create exactly n_trials for an SOA, split as evenly as possible across left/right."""
+        left_n = n_trials // 2
+        right_n = n_trials // 2
+        if n_trials % 2:
+            if random.choice([True, False]):
+                left_n += 1
+            else:
+                right_n += 1
+        return ([(cond, soa, 'left')] * left_n +
+                [(cond, soa, 'right')] * right_n)
+
     # Create experiment-specific stimuli
     if exp_type == 'srt':
         stim_color = [255, 0, 0]  # Red
@@ -2577,16 +2595,46 @@ def run_block(block_config, data_filename, config):
                                           pos=(10, 0))
         sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
-        sj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
-        total_trials = len(sj_mod_soas) * trials_per_condition * 6  # 6 conditions
+        # SJ_Mod uses the same 50/50 synchrony rule as standard SJ.
+        # For each modality/side condition, half of the experimental trials are 0 ms
+        # and half are distributed evenly across the 8 nonzero SOAs.
+        sj_mod_nonzero_soas = [-300, -200, -100, -50, 50, 100, 200, 300]
+        modality_mode = block_config.get('modality_mode', 'All')
+        if modality_mode == 'Visual Only':
+            mod_conditions = ['visual']
+            sj_mod_nonzero_soas = [-150, -125, -100, -75, -50, -25, 25, 50, 75, 100, 125, 150]
+        elif modality_mode == 'Auditory Only':
+            mod_conditions = ['auditory']
+        else:
+            mod_conditions = ['visual', 'auditory', 'audiovisual']
         instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black",
                                        pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
-        trial_types = [(cond, soa, side)
-                       for cond in ['visual', 'auditory', 'audiovisual']
-                       for soa in sj_mod_soas
-                       for side in ['left', 'right']
-                       for _ in range(trials_per_condition)]
+
+        trial_types = []
+        for cond in mod_conditions:
+            # trials_per_condition means TOTAL trials at each nonzero SOA,
+            # divided as evenly as possible between left-first and right-first.
+            nonzero_trials = []
+            for soa in sj_mod_nonzero_soas:
+                nonzero_trials.extend(
+                    split_trials_between_sides(cond, soa, trials_per_condition)
+                )
+
+            # SJ_Mod 50/50 rule: synchronous trials equal all asynchronous trials.
+            # Split the 0-ms trials evenly across left/right as well.
+            zero_trials = split_trials_between_sides(
+                cond, 0, len(nonzero_trials)
+            )
+            trial_types.extend(nonzero_trials + zero_trials)
+
+            # Add 10 clearly discriminable 1-second catch trials for this modality.
+            # Five use -1000 ms and five use +1000 ms; each set is split
+            # as evenly as possible between left-first and right-first.
+            trial_types.extend(split_trials_between_sides(cond, -1000, 5))
+            trial_types.extend(split_trials_between_sides(cond, 1000, 5))
+
+        total_trials = len(trial_types)
 
     elif exp_type == 'toj':
         stim_color = [255, 0, 0]  # Red
@@ -2610,39 +2658,216 @@ def run_block(block_config, data_filename, config):
         sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
         toj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
-        total_trials = len(toj_mod_soas) * trials_per_condition * 6  # 6 conditions
+        modality_mode = block_config.get('modality_mode', 'All')
+        if modality_mode == 'Visual Only':
+            mod_conditions = ['visual']
+            toj_mod_soas = [-150, -125, -100, -75, -50, -25, 0, 25, 50, 75, 100, 125, 150]
+        elif modality_mode == 'Auditory Only':
+            mod_conditions = ['auditory']
+        else:
+            mod_conditions = ['visual', 'auditory', 'audiovisual']
         instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black",
                                        pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
-        trial_types = [(cond, soa, side)
-                       for cond in ['visual', 'auditory', 'audiovisual']
-                       for soa in toj_mod_soas
-                       for side in ['left', 'right']
-                       for _ in range(trials_per_condition)]
+        trial_types = []
+        for cond in mod_conditions:
+            for soa in toj_mod_soas:
+                # trials_per_condition means TOTAL trials at this SOA,
+                # divided as evenly as possible between left-first and right-first.
+                trial_types.extend(
+                    split_trials_between_sides(cond, soa, trials_per_condition)
+                )
+
+            # Add 10 clearly discriminable 1-second catch trials for this modality.
+            # Five use -1000 ms and five use +1000 ms.
+            trial_types.extend(split_trials_between_sides(cond, -1000, 5))
+            trial_types.extend(split_trials_between_sides(cond, 1000, 5))
+
+        total_trials = len(trial_types)
 
     else:
         print(f"Unknown experiment type: {exp_type}")
         return
 
+    def run_practice_gate():
+        """Run up to 3 five-trial practice attempts; pass criterion is 4/5 (80%)."""
+        practice_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
+        practice_feedback = visual.TextStim(win, text="", color="black", pos=(0, -5), height=0.5)
+
+        for attempt in range(1, 4):
+            show_instructions(
+                f"PRACTICE - Attempt {attempt} of 3\n\n"
+                "You will complete 5 practice trials.\n"
+                "You need at least 4 correct (80%) to continue.\n\n"
+                "Press SPACE to begin practice."
+            )
+
+            correct = 0
+
+            if exp_type == 'sj':
+                practice_trials = [0, 0, -500, 500, random.choice([-500, 500])]
+                random.shuffle(practice_trials)
+                for n, soa in enumerate(practice_trials, 1):
+                    practice_counter.text = f"Practice {n}/5"
+                    response, _ = run_sj_trial(soa, visual_stim, sound_stim, instructions, practice_counter)
+                    expected = 1 if soa == 0 else 2
+                    correct += int(response == expected)
+
+            elif exp_type == 'toj':
+                practice_trials = [-500, 500, -500, 500, random.choice([-500, 500])]
+                random.shuffle(practice_trials)
+                for n, soa in enumerate(practice_trials, 1):
+                    practice_counter.text = f"Practice {n}/5"
+                    response, _ = run_toj_trial(soa, visual_stim, sound_stim, instructions, practice_counter)
+                    expected = 1 if soa < 0 else 2
+                    correct += int(response == expected)
+
+            elif exp_type in ['sj_mod', 'toj_mod']:
+                # In All mode, sample across the available modalities. In single-modality
+                # modes, all five practice trials use that selected modality.
+                if modality_mode == 'Visual Only':
+                    practice_conditions = ['visual'] * 5
+                elif modality_mode == 'Auditory Only':
+                    practice_conditions = ['auditory'] * 5
+                else:
+                    practice_conditions = ['visual', 'auditory', 'audiovisual', 'visual', 'auditory']
+                    random.shuffle(practice_conditions)
+
+                for n, cond in enumerate(practice_conditions, 1):
+                    practice_counter.text = f"Practice {n}/5"
+                    side = random.choice(['left', 'right'])
+
+                    if exp_type == 'sj_mod':
+                        # Include synchronous trials so practice tests both response categories.
+                        soa = 0 if n in (1, 2) else random.choice([-500, 500])
+                        response, _ = run_sj_mod_trial(
+                            cond, soa, side, visual_stim_left, visual_stim_right,
+                            sound_left, sound_right, instructions, practice_counter
+                        )
+                        expected = 1 if soa == 0 else 2
+                    else:
+                        soa = random.choice([-500, 500])
+                        response, _ = run_toj_mod_trial(
+                            cond, soa, side, visual_stim_left, visual_stim_right,
+                            sound_left, sound_right, instructions, practice_counter
+                        )
+                        if cond == 'audiovisual':
+                            expected = 1 if soa < 0 else 2  # audio first / visual first
+                        else:
+                            expected = 1 if side == 'left' else 2  # left first / right first
+
+                    correct += int(response == expected)
+
+            elif exp_type == 'srt':
+                practice_trials = ['visual', 'audio', 'audiovisual', 'visual', 'audio']
+                random.shuffle(practice_trials)
+                for n, practice_type in enumerate(practice_trials, 1):
+                    practice_feedback.text = f"Practice {n}/5"
+                    rt, status = run_srt_trial(
+                        practice_type, visual_stim, sound_stim, instructions, practice_feedback
+                    )
+                    correct += int(rt is not None and status == 'VALID')
+
+            elif exp_type == 'srt_mod':
+                practice_trials = random.sample([
+                    'visual_left', 'visual_right', 'visual_bilateral',
+                    'audio_left', 'audio_right', 'audio_bilateral',
+                    'audiovisual_left', 'audiovisual_right', 'audiovisual_bilateral'
+                ], 5)
+                for n, practice_type in enumerate(practice_trials, 1):
+                    practice_feedback.text = f"Practice {n}/5"
+                    rt = run_srt_mod_trial(
+                        practice_type, visual_stim_left, visual_stim_right,
+                        sound_left, sound_right, instructions, practice_feedback
+                    )
+                    correct += int(rt is not None)
+
+            percent = correct / 5.0
+            if percent >= 0.80:
+                show_instructions(
+                    f"Practice complete: {correct}/5 correct ({percent * 100:.0f}%).\n\n"
+                    "You passed the practice.\n"
+                    "Press SPACE to begin the actual experiment."
+                )
+                return True
+
+            if attempt < 3:
+                show_instructions(
+                    f"Practice score: {correct}/5 ({percent * 100:.0f}%).\n\n"
+                    "You need 4/5 correct to continue.\n"
+                    "You will try the practice again.\n\n"
+                    "Press SPACE to continue."
+                )
+
+        # After three failed attempts, do not automatically enter the experiment.
+        show_instructions(
+            "Practice criterion was not reached after 3 attempts.\n\n"
+            "Please notify the researcher before continuing.\n\n"
+            "Researcher: press SPACE to continue to the experiment,\n"
+            "or press ESCAPE to end the session."
+        )
+        return False
+
     # Prepare trials
     random.shuffle(trial_types)
 
     # Show instructions
-    if exp_type in ['sj', 'sj_mod']:
+    if exp_type == 'sj':
         show_instructions("You will see a red circle and hear a tone.\n"
                           "Your task is to judge if they occurred at the same time or not.\n\n"
                           "Press '1' if they seemed to occur at the same time.\n"
                           "Press '2' if they seemed to occur at different times.\n\n"
                           "Press SPACE to begin.")
-    elif exp_type in ['toj', 'toj_mod']:
+    elif exp_type == 'sj_mod':
+        if modality_mode == 'Visual Only':
+            show_instructions("You will see two red circles, one on the left and one on the right.\n"
+                              "Your task is to judge whether the two visual stimuli occurred at the same time or at different times.\n\n"
+                              "Press '1' for SAME TIME.\n"
+                              "Press '2' for DIFFERENT TIMES.\n\n"
+                              "Press SPACE to begin.")
+        elif modality_mode == 'Auditory Only':
+            show_instructions("You will hear two tones, one presented to the left ear and one to the right ear.\n"
+                              "Your task is to judge whether the two sounds occurred at the same time or at different times.\n\n"
+                              "Press '1' for SAME TIME.\n"
+                              "Press '2' for DIFFERENT TIMES.\n\n"
+                              "Press SPACE to begin.")
+        else:
+            show_instructions("Trials may contain visual, auditory, or audiovisual stimuli.\n"
+                              "Your task is to judge whether the two events occurred at the same time or at different times.\n\n"
+                              "Press '1' for SAME TIME.\n"
+                              "Press '2' for DIFFERENT TIMES.\n\n"
+                              "Press SPACE to begin.")
+    elif exp_type == 'toj':
         show_instructions("You will see a red circle and hear a tone.\n"
-                          "Your task is to judge which stimuli came first.\n\n"
+                          "Your task is to judge which stimulus came first.\n\n"
                           "Press '1' if Audio came 1st.\n"
                           "Press '2' if Visual came 1st.\n\n"
                           "Press SPACE to begin.")
+    elif exp_type == 'toj_mod':
+        if modality_mode == 'Visual Only':
+            show_instructions("You will see two red circles, one on the left and one on the right.\n"
+                              "Your task is to judge which visual stimulus appeared first.\n\n"
+                              "Press '1' if the LEFT stimulus came first.\n"
+                              "Press '2' if the RIGHT stimulus came first.\n\n"
+                              "Press SPACE to begin.")
+        elif modality_mode == 'Auditory Only':
+            show_instructions("You will hear two tones, one presented to the left ear and one to the right ear.\n"
+                              "Your task is to judge which sound occurred first.\n\n"
+                              "Press '1' if the LEFT sound came first.\n"
+                              "Press '2' if the RIGHT sound came first.\n\n"
+                              "Press SPACE to begin.")
+        else:
+            show_instructions("Trials may contain visual, auditory, or audiovisual stimuli.\n"
+                              "For visual-only or auditory-only trials, judge whether the LEFT or RIGHT event came first.\n"
+                              "For audiovisual trials, judge whether the AUDIO or VISUAL event came first.\n\n"
+                              "Visual/Auditory only: '1' = LEFT first, '2' = RIGHT first.\n"
+                              "Audiovisual: '1' = AUDIO first, '2' = VISUAL first.\n\n"
+                              "Press SPACE to begin.")
     else:
         show_instructions("Press spacebar when you see or hear a stimulus.\n\n"
                           "Press SPACE to begin.")
+
+    run_practice_gate()
 
     best_rt = float('inf')  # Initialize best RT for SRT and SRT_Mod
     for trial_num, trial in enumerate(trial_types, 1):
@@ -3099,55 +3324,48 @@ def run_experiment_series(config):
                 print("REDCap project not initialized. Skipping REDCap upload.")
 
             # ---------------------------------------------------------
-            # BETWEEN-TASK VIDEO
+            # BETWEEN-BLOCK VIDEO
             # ---------------------------------------------------------
-            # Play the selected video only when:
-            #   1. There is another block after this one, AND
-            #   2. The next block is a different experiment/task.
-            #
-            # Example:
-            # SJ -> TOJ = video
-            # TOJ -> SRT = video
-            # SJ -> SJ = no video
-            # Final task = no video
+            # A break video plays after EVERY block except the final block,
+            # regardless of whether the next block uses the same task.
+            # Video 1 and Video 2 alternate across transitions:
+            #   transition 1 -> Video 1
+            #   transition 2 -> Video 2
+            #   transition 3 -> Video 1, etc.
             # ---------------------------------------------------------
 
             if i < len(config['blocks']):
                 current_task = block['experiment'].lower()
                 next_task = config['blocks'][i]['experiment'].lower()
 
-                if current_task != next_task:
+                between_task_videos = [
+                    path for path in config.get('between_task_videos', [])
+                    if path
+                ]
 
-                    between_task_videos = config.get(
-                        'between_task_videos',
-                        []
+                if not between_task_videos:
+                    raise RuntimeError(
+                        f"No break video configured for block transition {i}."
                     )
 
-                    if transition_video_index >= len(between_task_videos):
-                        raise RuntimeError(
-                            "No video configured for "
-                            f"task transition {transition_video_index + 1}"
-                        )
+                # Alternate through the configured videos. With two videos this
+                # produces Video 1, Video 2, Video 1, Video 2, ...
+                video_index = transition_video_index % len(between_task_videos)
+                video_path = between_task_videos[video_index]
 
-                    video_path = between_task_videos[
-                        transition_video_index
-                    ]
+                print(
+                    f"Block transition: "
+                    f"{current_task.upper()} -> "
+                    f"{next_task.upper()}"
+                )
 
-                    print(
-                        f"Task transition: "
-                        f"{current_task.upper()} -> "
-                        f"{next_task.upper()}"
-                    )
+                print(
+                    f"Playing break video {video_index + 1}: "
+                    f"{video_path}"
+                )
 
-                    print(
-                        f"Playing break video "
-                        f"{transition_video_index + 1}: "
-                        f"{video_path}"
-                    )
-
-                    play_between_task_video(video_path)
-
-                    transition_video_index += 1
+                play_between_task_video(video_path)
+                transition_video_index += 1
 
         # Experiment series complete
         print("\nAll blocks completed successfully")
