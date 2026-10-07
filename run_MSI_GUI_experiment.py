@@ -1960,8 +1960,8 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
             else:
                 soa_display = f"V{first_marker}{abs(soa)}V{second_marker}"
         else:  # auditory
-            first_marker = "L" if side == "left" else "R"
-            second_marker = "R" if side == "left" else "L"
+            first_marker = "H" if side == "high" else "L"
+            second_marker = "L" if side == "high" else "H"
             if soa == 0:
                 soa_display = "A-SYNC"
             else:
@@ -2044,10 +2044,12 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
         sound_left.stop()
         sound_right.stop()
 
-        if side == 'left':
-            first_sound, second_sound = sound_left, sound_right
+        # Auditory-only direction is pitch order, not spatial side.
+        low_sound, high_sound = sound_left, sound_right
+        if side == 'high':
+            first_sound, second_sound = high_sound, low_sound
         else:
-            first_sound, second_sound = sound_right, sound_left
+            first_sound, second_sound = low_sound, high_sound
 
         if soa == 0:  # Simultaneous bilateral audio
             fixation.draw()
@@ -2240,8 +2242,8 @@ def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right
             else:
                 soa_display = f"V{first_marker}{abs(soa)}V{second_marker}"
         else:  # auditory
-            first_marker = "L" if side == "left" else "R"
-            second_marker = "R" if side == "left" else "L"
+            first_marker = "H" if side == "high" else "L"
+            second_marker = "L" if side == "high" else "H"
             if soa == 0:
                 soa_display = "A-SYNC"
             else:
@@ -2324,10 +2326,12 @@ def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right
         sound_left.stop()
         sound_right.stop()
 
-        if side == 'left':
-            first_sound, second_sound = sound_left, sound_right
+        # Auditory-only direction is pitch order, not spatial side.
+        low_sound, high_sound = sound_left, sound_right
+        if side == 'high':
+            first_sound, second_sound = high_sound, low_sound
         else:
-            first_sound, second_sound = sound_right, sound_left
+            first_sound, second_sound = low_sound, high_sound
 
         if soa == 0:  # Simultaneous bilateral audio
             fixation.draw()
@@ -2497,8 +2501,9 @@ def run_block(block_config, data_filename, config):
     trials_per_condition = block_config['trials_per_condition']
     block_number = block_config['block_number']
 
-    def split_trials_between_sides(cond, soa, n_trials):
-        """Create exactly n_trials for an SOA, split as evenly as possible across left/right."""
+    def split_trials_between_directions(cond, soa, n_trials):
+        """Split visual/AV across left-right, auditory across high-low pitch first."""
+        labels = ('high', 'low') if cond == 'auditory' else ('left', 'right')
         left_n = n_trials // 2
         right_n = n_trials // 2
         if n_trials % 2:
@@ -2506,8 +2511,8 @@ def run_block(block_config, data_filename, config):
                 left_n += 1
             else:
                 right_n += 1
-        return ([(cond, soa, 'left')] * left_n +
-                [(cond, soa, 'right')] * right_n)
+        return ([(cond, soa, labels[0])] * left_n +
+                [(cond, soa, labels[1])] * right_n)
 
     # Create experiment-specific stimuli
     if exp_type == 'srt':
@@ -2618,12 +2623,12 @@ def run_block(block_config, data_filename, config):
             nonzero_trials = []
             for soa in sj_mod_nonzero_soas:
                 nonzero_trials.extend(
-                    split_trials_between_sides(cond, soa, trials_per_condition)
+                    split_trials_between_directions(cond, soa, trials_per_condition)
                 )
 
             # SJ_Mod 50/50 rule: synchronous trials equal all asynchronous trials.
             # Split the 0-ms trials evenly across left/right as well.
-            zero_trials = split_trials_between_sides(
+            zero_trials = split_trials_between_directions(
                 cond, 0, len(nonzero_trials)
             )
             trial_types.extend(nonzero_trials + zero_trials)
@@ -2631,8 +2636,8 @@ def run_block(block_config, data_filename, config):
             # Add 10 clearly discriminable 1-second catch trials for this modality.
             # Five use -1000 ms and five use +1000 ms; each set is split
             # as evenly as possible between left-first and right-first.
-            trial_types.extend(split_trials_between_sides(cond, -1000, 5))
-            trial_types.extend(split_trials_between_sides(cond, 1000, 5))
+            trial_types.extend(split_trials_between_directions(cond, -1000, 5))
+            trial_types.extend(split_trials_between_directions(cond, 1000, 5))
 
         total_trials = len(trial_types)
 
@@ -2675,13 +2680,13 @@ def run_block(block_config, data_filename, config):
                 # trials_per_condition means TOTAL trials at this SOA,
                 # divided as evenly as possible between left-first and right-first.
                 trial_types.extend(
-                    split_trials_between_sides(cond, soa, trials_per_condition)
+                    split_trials_between_directions(cond, soa, trials_per_condition)
                 )
 
             # Add 10 clearly discriminable 1-second catch trials for this modality.
             # Five use -1000 ms and five use +1000 ms.
-            trial_types.extend(split_trials_between_sides(cond, -1000, 5))
-            trial_types.extend(split_trials_between_sides(cond, 1000, 5))
+            trial_types.extend(split_trials_between_directions(cond, -1000, 5))
+            trial_types.extend(split_trials_between_directions(cond, 1000, 5))
 
         total_trials = len(trial_types)
 
@@ -2735,7 +2740,7 @@ def run_block(block_config, data_filename, config):
 
                 for n, cond in enumerate(practice_conditions, 1):
                     practice_counter.text = f"Practice {n}/5"
-                    side = random.choice(['left', 'right'])
+                    side = random.choice(['high', 'low']) if cond == 'auditory' else random.choice(['left', 'right'])
 
                     if exp_type == 'sj_mod':
                         # Include synchronous trials so practice tests both response categories.
@@ -2753,6 +2758,8 @@ def run_block(block_config, data_filename, config):
                         )
                         if cond == 'audiovisual':
                             expected = 1 if soa < 0 else 2  # audio first / visual first
+                        elif cond == 'auditory':
+                            expected = 1 if side == 'high' else 2  # high pitch first / low pitch first
                         else:
                             expected = 1 if side == 'left' else 2  # left first / right first
 
@@ -2826,7 +2833,7 @@ def run_block(block_config, data_filename, config):
                               "Press '2' for DIFFERENT TIMES.\n\n"
                               "Press SPACE to begin.")
         elif modality_mode == 'Auditory Only':
-            show_instructions("You will hear two tones, one presented to the left ear and one to the right ear.\n"
+            show_instructions("You will hear two tones: one HIGH pitch and one LOW pitch.\n"
                               "Your task is to judge whether the two sounds occurred at the same time or at different times.\n\n"
                               "Press '1' for SAME TIME.\n"
                               "Press '2' for DIFFERENT TIMES.\n\n"
@@ -2851,16 +2858,18 @@ def run_block(block_config, data_filename, config):
                               "Press '2' if the RIGHT stimulus came first.\n\n"
                               "Press SPACE to begin.")
         elif modality_mode == 'Auditory Only':
-            show_instructions("You will hear two tones, one presented to the left ear and one to the right ear.\n"
+            show_instructions("You will hear two tones: one HIGH pitch and one LOW pitch.\n"
                               "Your task is to judge which sound occurred first.\n\n"
-                              "Press '1' if the LEFT sound came first.\n"
-                              "Press '2' if the RIGHT sound came first.\n\n"
+                              "Press '1' if the HIGH pitch came first.\n"
+                              "Press '2' if the LOW pitch came first.\n\n"
                               "Press SPACE to begin.")
         else:
             show_instructions("Trials may contain visual, auditory, or audiovisual stimuli.\n"
-                              "For visual-only or auditory-only trials, judge whether the LEFT or RIGHT event came first.\n"
+                              "For visual-only trials, judge whether the LEFT or RIGHT event came first.\n"
+                              "For auditory-only trials, judge whether the HIGH or LOW pitch came first.\n"
                               "For audiovisual trials, judge whether the AUDIO or VISUAL event came first.\n\n"
-                              "Visual/Auditory only: '1' = LEFT first, '2' = RIGHT first.\n"
+                              "Visual: '1' = LEFT first, '2' = RIGHT first.\n"
+                              "Auditory: '1' = HIGH first, '2' = LOW first.\n"
                               "Audiovisual: '1' = AUDIO first, '2' = VISUAL first.\n\n"
                               "Press SPACE to begin.")
     else:
