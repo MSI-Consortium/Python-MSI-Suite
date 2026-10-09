@@ -459,7 +459,7 @@ def generate_pdf_report(
         ],
 
         [
-            "Maximum TOJ slope",
+            "Maximum TOJ logistic scale",
             f"{qc_settings['max_slope_ms']} ms"
         ],
 
@@ -606,11 +606,11 @@ def generate_pdf_report(
         ],
 
         [
-            "TOJ Fit QC",
+            "TOJ / TOJ_Mod Fit QC",
             (
                 "Does the logistic function adequately describe the "
                 "observed TOJ data? R² must meet the minimum criterion, "
-                "and slope must be positive and below the maximum."
+                "and logistic scale must be positive and below the maximum."
             )
         ],
 
@@ -640,6 +640,10 @@ def generate_pdf_report(
             )
         ],
 
+        [
+            "TOJ JND",
+            "JND 25-75 = (SOA at 75% - SOA at 25%) / 2; for a logistic curve this equals ln(3) times its scale parameter."
+        ],
         [
             "SRT Anticipation",
             (
@@ -985,8 +989,10 @@ def generate_pdf_report(
         [
             "Participant_ID",
             "TOJ_PSS_ms",
-            "TOJ_Slope",
-            "TOJ_JND_ms",
+            "TOJ_Logistic_Scale_ms",
+            "TOJ_JND_25_75_ms",
+            "TOJ_SOA_25_ms",
+            "TOJ_SOA_75_ms",
             "TOJ_R2",
             "TOJ_Catch_Correct",
             "TOJ_Catch_OK",
@@ -1002,11 +1008,13 @@ def generate_pdf_report(
             "TOJ_PSS_ms":
                 "PSS",
 
-            "TOJ_Slope":
-                "Slope",
+            "TOJ_Logistic_Scale_ms":
+                "Scale (ms)",
 
-            "TOJ_JND_ms":
-                "JND",
+            "TOJ_JND_25_75_ms":
+                "JND 25-75 (ms)",
+            "TOJ_SOA_25_ms": "SOA 25 (ms)",
+            "TOJ_SOA_75_ms": "SOA 75 (ms)",
 
             "TOJ_R2":
                 "R²",
@@ -1209,6 +1217,37 @@ def generate_pdf_report(
         srt_modality_table
     )
 
+    # TOJ_Mod: each modality has its own distinct response mapping.
+    for modality in ("Visual", "Auditory", "Audiovisual"):
+        prefix = f"TOJ_Mod_{modality}"
+        if f"{prefix}_Trials" not in results.columns:
+            continue
+        columns = ["Participant_ID"] + [
+            f"{prefix}_{suffix}" for suffix in (
+                "Trials", "PSS_ms", "Logistic_Scale_ms", "JND_25_75_ms",
+                "SOA_25_ms", "SOA_75_ms", "R2", "Catch_Correct",
+                "Catch_Trials", "Catch_OK", "Fit_OK",
+                "Response_Range_OK", "Response_Bias_OK", "QC_OK"
+            )
+        ]
+        names = {"Participant_ID": "ID"}
+        names.update({f"{prefix}_{key}": value for key, value in {
+            "Trials": "N", "PSS_ms": "PSS",
+            "Logistic_Scale_ms": "Scale (ms)", "JND_25_75_ms": "JND 25-75 (ms)",
+            "SOA_25_ms": "SOA 25", "SOA_75_ms": "SOA 75",
+            "R2": "R2", "Catch_Correct": "Catch correct",
+            "Catch_Trials": "Catch N", "Catch_OK": "Catch QC",
+            "Fit_OK": "Fit QC", "Response_Range_OK": "Range QC",
+            "Response_Bias_OK": "Bias QC", "QC_OK": "Overall QC"
+        }.items()})
+        story.append(Spacer(1, 0.08 * inch))
+        story.append(create_results_table(
+            f"Modified Temporal Order Judgment - {modality}",
+            columns, names, font_size=6
+        ))
+
+
+
     # ==================================================
     # PARTICIPANT PAGES
     # ==================================================
@@ -1377,18 +1416,18 @@ def generate_pdf_report(
                 ),
 
                 (
-                    "Slope: "
+                    "Scale: "
                     + format_value(
                         row,
-                        "TOJ_Slope"
+                        "TOJ_Logistic_Scale_ms"
                     )
                 ),
 
                 (
-                    "JND: "
+                    "JND 25-75: "
                     + format_value(
                         row,
-                        "TOJ_JND_ms",
+                        "TOJ_JND_25_75_ms",
                         suffix=" ms"
                     )
                 ),
@@ -1419,6 +1458,22 @@ def generate_pdf_report(
                     row,
                     "TOJ_Fit_OK"
                 )
+            ])
+
+        # TOJ_Mod rows, one per available modality.
+        for modality in ("Visual", "Auditory", "Audiovisual"):
+            prefix = f"TOJ_Mod_{modality}"
+            if f"{prefix}_Trials" not in results.columns or pd.isna(row.get(f"{prefix}_Trials")):
+                continue
+            participant_results_data.append([
+                f"TOJ_Mod {modality}",
+                "PSS: " + format_value(row, f"{prefix}_PSS_ms", suffix=" ms"),
+                "Scale: " + format_value(row, f"{prefix}_Logistic_Scale_ms", suffix=" ms"),
+                "JND 25-75: " + format_value(row, f"{prefix}_JND_25_75_ms", suffix=" ms"),
+                "R2: " + format_value(row, f"{prefix}_R2", decimals=3),
+                "Catch: " + format_value(row, f"{prefix}_Catch_Correct", decimals=0)
+                + "/" + format_value(row, f"{prefix}_Catch_Trials", decimals=0),
+                qc_status(row, f"{prefix}_QC_OK")
             ])
 
         # ==================================================
@@ -1630,6 +1685,34 @@ def generate_pdf_report(
             participant_results_table
         )
 
+        # Auditable 25% and 75% logistic thresholds for available TOJ fits.
+        threshold_rows = [["Task", "SOA 25% (ms)", "SOA 75% (ms)", "Logistic scale (ms)", "JND 25-75 (ms)"]]
+        for label, prefix in [("TOJ", "TOJ")] + [
+            (f"TOJ_Mod {modality}", f"TOJ_Mod_{modality}")
+            for modality in ("Visual", "Auditory", "Audiovisual")
+        ]:
+            if f"{prefix}_JND_25_75_ms" not in row.index or pd.isna(row.get(f"{prefix}_JND_25_75_ms")):
+                continue
+            threshold_rows.append([
+                label,
+                format_value(row, f"{prefix}_SOA_25_ms"),
+                format_value(row, f"{prefix}_SOA_75_ms"),
+                format_value(row, f"{prefix}_Logistic_Scale_ms"),
+                format_value(row, f"{prefix}_JND_25_75_ms"),
+            ])
+        if len(threshold_rows) > 1:
+            story.append(Spacer(1, 0.07 * inch))
+            story.append(Paragraph("TOJ logistic thresholds (JND = [SOA75 - SOA25] / 2)", master_section_style))
+            threshold_table = Table(threshold_rows, colWidths=[1.9*inch, 1.5*inch, 1.5*inch, 2.1*inch, 1.8*inch], repeatRows=1)
+            threshold_table.setStyle(TableStyle([
+                ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+                ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
+                ("FONTSIZE", (0,0), (-1,-1), 7),
+                ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+                ("ALIGN", (1,0), (-1,-1), "CENTER"),
+            ]))
+            story.append(threshold_table)
+
         story.append(
             Spacer(
                 1,
@@ -1641,38 +1724,21 @@ def generate_pdf_report(
         # PARTICIPANT PLOTS
         # ==================================================
 
+        # Report fitted plots only. Raw plots are still generated and saved
+        # by the analysis modules, but are intentionally excluded from this PDF.
         plot_specs = [
-
-            (
-                "SJ_Raw.png",
-                "SJ Raw"
-            ),
-
-            (
-                "SJ_Fitted.png",
-                "SJ Fitted"
-            ),
-
-            (
-                "SRT_Histogram.png",
-                "SRT Histogram"
-            ),
-
-            (
-                "TOJ_Raw.png",
-                "TOJ Raw"
-            ),
-
-            (
-                "TOJ_Fitted.png",
-                "TOJ Fitted"
-            ),
-
-            (
-                "SRT_By_Modality.png",
-                "SRT by Modality"
-            )
+            ("SJ_Fitted.png", "SJ Fitted"),
+            ("TOJ_Fitted.png", "TOJ Fitted"),
         ]
+
+        for modality in ("Visual", "Auditory", "Audiovisual"):
+            plot_specs.append((
+                f"TOJ_Mod_{modality}_Fitted.png",
+                f"TOJ_Mod {modality} Fitted"
+            ))
+
+        # SRT has no fitted psychometric curve, so its descriptive
+        # histogram and modality scatterplot are not included.
 
         plot_items = []
 
@@ -1769,48 +1835,11 @@ def generate_pdf_report(
         # ==================================================
 
         plot_rows = []
-
-        if plot_items:
-
-            first_row = (
-                plot_items[:3]
-            )
-
-            while len(
-                first_row
-            ) < 3:
-
-                first_row.append(
-                    Spacer(
-                        1,
-                        0
-                    )
-                )
-
-            plot_rows.append(
-                first_row
-            )
-
-            second_row = (
-                plot_items[3:6]
-            )
-
-            if second_row:
-
-                while len(
-                    second_row
-                ) < 3:
-
-                    second_row.append(
-                        Spacer(
-                            1,
-                            0
-                        )
-                    )
-
-                plot_rows.append(
-                    second_row
-                )
+        for start_index in range(0, len(plot_items), 3):
+            current_row = plot_items[start_index:start_index + 3]
+            while len(current_row) < 3:
+                current_row.append(Spacer(1, 0))
+            plot_rows.append(current_row)
 
         if plot_rows:
 

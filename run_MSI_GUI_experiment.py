@@ -881,6 +881,39 @@ def show_instructions(text):
         core.wait(0.001)
 
 
+def show_pitch_familiarization(high_sound, low_sound):
+    """Let participants hear the actual HIGH and LOW task sounds before practice."""
+    prompt = visual.TextStim(
+        win,
+        text=("LISTEN TO THE TWO TONES\n\n"
+              "Press 1 to hear the HIGH-pitch tone.\n"
+              "Press 2 to hear the LOW-pitch tone.\n\n"
+              "You may replay either tone as often as you need.\n"
+              "Press SPACE when you can tell them apart and are ready to continue."),
+        color="black", height=0.65, wrapWidth=30)
+    event.clearEvents(eventType='keyboard')
+    try:
+        while True:
+            prompt.draw()
+            win.flip()
+            for key in event.getKeys(keyList=['1', '2', 'space', 'escape']):
+                if key == 'escape':
+                    cleanup()
+                if key == 'space':
+                    return
+                high_sound.stop()
+                low_sound.stop()
+                if key == '1':
+                    high_sound.play()
+                elif key == '2':
+                    low_sound.play()
+            core.wait(0.005)
+    finally:
+        high_sound.stop()
+        low_sound.stop()
+        event.clearEvents(eventType='keyboard')
+
+
 def mandatory_screen_break(duration=60):
     """
     Mandatory 60-second screen break.
@@ -1934,6 +1967,7 @@ def run_srt_mod_trial(trial_type, visual_stim_left, visual_stim_right, sound_lef
 
 def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions,
                      trial_counter):
+    set_trial_legend(instructions, 'sj_mod', trial_type)
     print(f"\nStarting SJ_Mod trial: {trial_type}, SOA: {soa}ms, Side: {side}")
     av_sync = config.get('av_sync_correction', 0.0)
     adjusted_soa = soa + av_sync
@@ -2216,6 +2250,7 @@ def run_sj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right,
 
 def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right, sound_left, sound_right, instructions,
                       trial_counter):
+    set_trial_legend(instructions, 'toj_mod', trial_type)
     print(f"\nStarting toj_Mod trial: {trial_type}, SOA: {soa}ms, Side: {side}")
     av_sync = config.get('av_sync_correction', 0.0)
     adjusted_soa = soa + av_sync
@@ -2496,6 +2531,64 @@ def run_toj_mod_trial(trial_type, soa, side, visual_stim_left, visual_stim_right
     return response, rt
 
 
+# Defaults also support older saved JSON configurations without soa_settings.
+SOA_DEFAULTS = {
+    'sj': [50, 100, 150, 200, 250, 300],
+    'toj': [50, 100, 150, 200, 250, 300],
+    'sj_mod_visual': [25, 50, 75, 100, 125, 150],
+    'sj_mod_other': [50, 100, 200, 300],
+    'toj_mod_visual': [15, 30, 45, 60, 75, 90, 100, 150],
+    'toj_mod_auditory': [15, 30, 45, 60, 75, 90, 100, 150, 200],
+    'toj_mod_audiovisual': [50, 100, 200, 300],
+}
+
+
+def configured_soas(block, key):
+    """Read GUI magnitudes; accept older signed configurations without doubling levels."""
+    values = block.get('soa_settings', {}).get(key, SOA_DEFAULTS[key])
+    values = [int(v) for v in values]
+    if not values or any(abs(v) > 1000 for v in values):
+        raise ValueError('Invalid SOA configuration for ' + key)
+    magnitudes = [abs(v) for v in values if v != 0]
+    if not magnitudes:
+        raise ValueError('Enter at least one nonzero SOA for ' + key)
+    return list(dict.fromkeys(magnitudes))
+
+
+def signed_soas(magnitudes, include_zero=False):
+    """Generate both temporal orders, with optional zero-SOA trials."""
+    values = sorted(set(abs(int(v)) for v in magnitudes if int(v) != 0))
+    return [-v for v in reversed(values)] + ([0] if include_zero else []) + values
+
+
+def response_legend(experiment, condition=None):
+    """Participant-facing response legend; never reveal the correct trial order."""
+    experiment = experiment.lower()
+    if experiment in ('srt', 'srt_mod'):
+        return 'Press SPACE when you see or hear a stimulus.'
+    if experiment in ('sj', 'sj_mod'):
+        return '1 = SAME TIME     2 = DIFFERENT TIMES'
+    if experiment == 'toj':
+        return '1 = AUDIO first     2 = VISUAL first'
+    if experiment == 'toj_mod':
+        if condition == 'visual':
+            return 'VISUAL: 1 = LEFT first     2 = RIGHT first'
+        if condition == 'auditory':
+            return 'AUDITORY: 1 = HIGH first     2 = LOW first'
+        if condition == 'audiovisual':
+            return 'AUDIOVISUAL: 1 = AUDIO first     2 = VISUAL first'
+        return ('VISUAL: 1 = LEFT, 2 = RIGHT\n'
+                'AUDITORY: 1 = HIGH, 2 = LOW\n'
+                'AUDIOVISUAL: 1 = AUDIO, 2 = VISUAL\n'
+                '(Choose which came FIRST)')
+    raise ValueError('Unknown experiment: ' + experiment)
+
+
+def set_trial_legend(instructions, experiment, condition=None):
+    """Refresh the persistent on-screen legend before every trial, including practice."""
+    instructions.text = response_legend(experiment, condition)
+
+
 def run_block(block_config, data_filename, config):
     exp_type = block_config['experiment'].lower()
     trials_per_condition = block_config['trials_per_condition']
@@ -2520,7 +2613,7 @@ def run_block(block_config, data_filename, config):
         visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
         total_trials = trials_per_condition * 3
-        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black",
+        instructions = visual.TextStim(win, text=response_legend(exp_type), color="black",
                                        pos=(0, -7), height=0.5)
         feedback = visual.TextStim(win, text="", color="black", pos=(0, -5))
         trial_types = ['visual', 'audio', 'audiovisual'] * trials_per_condition
@@ -2545,7 +2638,7 @@ def run_block(block_config, data_filename, config):
                         'audiovisual_left', 'audiovisual_right', 'audiovisual_bilateral']
                        * trials_per_condition)
         total_trials = len(trial_types)
-        instructions = visual.TextStim(win, text="Press spacebar when you see or hear a stimulus.", color="black",
+        instructions = visual.TextStim(win, text=response_legend(exp_type), color="black",
                                        pos=(0, -7), height=0.5)
         feedback = visual.TextStim(win, text="", color="black", pos=(0, -5))
 
@@ -2554,10 +2647,7 @@ def run_block(block_config, data_filename, config):
         visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
         # Non-synchronous SOAs
-        sj_nonzero_soas = [
-            -300, -250, -200, -150, -100, -50,
-            50, 100, 150, 200, 250, 300
-        ]
+        sj_nonzero_soas = signed_soas(configured_soas(block_config, 'sj'))
 
         # Each nonzero SOA occurs trials_per_condition times
         nonzero_trials = sj_nonzero_soas * trials_per_condition
@@ -2578,7 +2668,7 @@ def run_block(block_config, data_filename, config):
 
         instructions = visual.TextStim(
             win,
-            text="Press '1' for Same Time, '2' for Different Time",
+            text=response_legend(exp_type),
             color="black",
             pos=(0, -7),
             height=0.5
@@ -2603,16 +2693,16 @@ def run_block(block_config, data_filename, config):
         # SJ_Mod uses the same 50/50 synchrony rule as standard SJ.
         # For each modality/side condition, half of the experimental trials are 0 ms
         # and half are distributed evenly across the 8 nonzero SOAs.
-        sj_mod_nonzero_soas = [-300, -200, -100, -50, 50, 100, 200, 300]
+        sj_mod_nonzero_soas = configured_soas(block_config, 'sj_mod_other')
         modality_mode = block_config.get('modality_mode', 'All')
         if modality_mode == 'Visual Only':
             mod_conditions = ['visual']
-            sj_mod_nonzero_soas = [-150, -125, -100, -75, -50, -25, 25, 50, 75, 100, 125, 150]
+            sj_mod_nonzero_soas = configured_soas(block_config, 'sj_mod_visual')
         elif modality_mode == 'Auditory Only':
             mod_conditions = ['auditory']
         else:
             mod_conditions = ['visual', 'auditory', 'audiovisual']
-        instructions = visual.TextStim(win, text="Press '1' for Same Time, '2' for Different Time", color="black",
+        instructions = visual.TextStim(win, text=response_legend(exp_type), color="black",
                                        pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
 
@@ -2621,10 +2711,12 @@ def run_block(block_config, data_filename, config):
             # trials_per_condition means TOTAL trials at each nonzero SOA,
             # divided as evenly as possible between left-first and right-first.
             nonzero_trials = []
-            for soa in sj_mod_nonzero_soas:
-                nonzero_trials.extend(
-                    split_trials_between_directions(cond, soa, trials_per_condition)
-                )
+            for soa in signed_soas(configured_soas(block_config, 'sj_mod_visual') if cond == 'visual' else configured_soas(block_config, 'sj_mod_other')):
+                if cond in ('visual', 'auditory'):
+                    first = ('left' if cond == 'visual' else 'high') if soa < 0 else ('right' if cond == 'visual' else 'low')
+                    nonzero_trials.extend([(cond, soa, first)] * trials_per_condition)
+                else:
+                    nonzero_trials.extend(split_trials_between_directions(cond, soa, trials_per_condition))
 
             # SJ_Mod 50/50 rule: synchronous trials equal all asynchronous trials.
             # Split the 0-ms trials evenly across left/right as well.
@@ -2636,8 +2728,14 @@ def run_block(block_config, data_filename, config):
             # Add 10 clearly discriminable 1-second catch trials for this modality.
             # Five use -1000 ms and five use +1000 ms; each set is split
             # as evenly as possible between left-first and right-first.
-            trial_types.extend(split_trials_between_directions(cond, -1000, 5))
-            trial_types.extend(split_trials_between_directions(cond, 1000, 5))
+            if cond in ('visual', 'auditory'):
+                negative_first = 'left' if cond == 'visual' else 'high'
+                positive_first = 'right' if cond == 'visual' else 'low'
+                trial_types.extend([(cond, -1000, negative_first)] * 5)
+                trial_types.extend([(cond, 1000, positive_first)] * 5)
+            else:
+                trial_types.extend(split_trials_between_directions(cond, -1000, 5))
+                trial_types.extend(split_trials_between_directions(cond, 1000, 5))
 
         total_trials = len(trial_types)
 
@@ -2645,11 +2743,11 @@ def run_block(block_config, data_filename, config):
         stim_color = [255, 0, 0]  # Red
         visual_stim = visual.Circle(win, radius=stim_size / 2, fillColor=[c / 255 for c in stim_color], pos=(0, 0))
         sound_stim = sound.Sound(os.path.join(os.path.dirname(__file__), "tone.wav"), secs=VISUAL_STIM_DURATION)
-        toj_soas = [-300, -250, -200, -150, -100, -50, 0, 50, 100, 150, 200, 250, 300]
+        toj_soas = signed_soas(configured_soas(block_config, 'toj'), include_zero=False)
         # Add 10 catch trials at a 1-second SOA: 5 audio-first and 5 visual-first.
         catch_trials = [-1000] * 5 + [1000] * 5
         total_trials = len(toj_soas) * trials_per_condition + len(catch_trials)
-        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black",
+        instructions = visual.TextStim(win, text=response_legend(exp_type), color="black",
                                        pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
         trial_types = toj_soas * trials_per_condition + catch_trials
@@ -2662,31 +2760,41 @@ def run_block(block_config, data_filename, config):
                                           pos=(10, 0))
         sound_left = sound.Sound(os.path.join(os.path.dirname(__file__), "low_pitch.wav"), secs=VISUAL_STIM_DURATION)
         sound_right = sound.Sound(os.path.join(os.path.dirname(__file__), "high_pitch.wav"), secs=VISUAL_STIM_DURATION)
-        toj_mod_soas = [-300, -200, -100, -50, 0, 50, 100, 200, 300]
+        toj_mod_soas = configured_soas(block_config, 'toj_mod_audiovisual')
         modality_mode = block_config.get('modality_mode', 'All')
         if modality_mode == 'Visual Only':
             mod_conditions = ['visual']
-            toj_mod_soas = [-150, -125, -100, -75, -50, -25, 0, 25, 50, 75, 100, 125, 150]
+            toj_mod_soas = configured_soas(block_config, 'toj_mod_visual')
         elif modality_mode == 'Auditory Only':
             mod_conditions = ['auditory']
         else:
             mod_conditions = ['visual', 'auditory', 'audiovisual']
-        instructions = visual.TextStim(win, text="Press '1' for Audio 1st, '2' for Visual 1st", color="black",
+        instructions = visual.TextStim(win, text=response_legend(exp_type), color="black",
                                        pos=(0, -7), height=0.5)
         trial_counter = visual.TextStim(win, text="", color="black", pos=(0, -8), height=0.5)
         trial_types = []
         for cond in mod_conditions:
-            for soa in toj_mod_soas:
-                # trials_per_condition means TOTAL trials at this SOA,
-                # divided as evenly as possible between left-first and right-first.
-                trial_types.extend(
-                    split_trials_between_directions(cond, soa, trials_per_condition)
-                )
-
-            # Add 10 clearly discriminable 1-second catch trials for this modality.
-            # Five use -1000 ms and five use +1000 ms.
-            trial_types.extend(split_trials_between_directions(cond, -1000, 5))
-            trial_types.extend(split_trials_between_directions(cond, 1000, 5))
+            entered_soas = configured_soas(block_config, 'toj_mod_' + cond)
+            if cond in ('visual', 'auditory'):
+                # GUI values are unsigned magnitudes. Each becomes TWO signed
+                # conditions with trials_per_condition repetitions EACH.
+                # The side field controls the actual first stimulus.
+                if any(soa <= 0 for soa in entered_soas):
+                    raise ValueError('TOJ_Mod visual/auditory SOAs must be positive magnitudes')
+                negative_first = 'left' if cond == 'visual' else 'high'
+                positive_first = 'right' if cond == 'visual' else 'low'
+                for magnitude in entered_soas:
+                    trial_types.extend([(cond, -magnitude, negative_first)] * trials_per_condition)
+                    trial_types.extend([(cond, magnitude, positive_first)] * trials_per_condition)
+                # Five catch trials in each direction, 10 per modality.
+                trial_types.extend([(cond, -1000, negative_first)] * 5)
+                trial_types.extend([(cond, 1000, positive_first)] * 5)
+            else:
+                # AV SOAs already include their signs; retain existing behavior.
+                for soa in signed_soas(entered_soas, include_zero=False):
+                    trial_types.extend(split_trials_between_directions(cond, soa, trials_per_condition))
+                trial_types.extend(split_trials_between_directions(cond, -1000, 5))
+                trial_types.extend(split_trials_between_directions(cond, 1000, 5))
 
         total_trials = len(trial_types)
 
@@ -2872,9 +2980,21 @@ def run_block(block_config, data_filename, config):
                               "Auditory: '1' = HIGH first, '2' = LOW first.\n"
                               "Audiovisual: '1' = AUDIO first, '2' = VISUAL first.\n\n"
                               "Press SPACE to begin.")
-    else:
-        show_instructions("Press spacebar when you see or hear a stimulus.\n\n"
+    elif exp_type == 'srt_mod':
+        show_instructions("You may see a LEFT, RIGHT, or BOTH visual stimuli,\n"
+                          "hear a LEFT, RIGHT, or BOTH auditory stimuli,\n"
+                          "or receive visual and auditory stimuli together.\n\n"
+                          "Press SPACE as quickly as possible when any stimulus occurs.\n\n"
                           "Press SPACE to begin.")
+    else:
+        show_instructions("You will see a red circle, hear a tone, or experience both.\n"
+                          "Press SPACE as quickly as possible when a stimulus occurs.\n\n"
+                          "Press SPACE to begin.")
+
+    # Pitch familiarization for any SJ_Mod / TOJ_Mod block containing auditory trials.
+    if exp_type in ('sj_mod', 'toj_mod') and modality_mode != 'Visual Only':
+        # sound_right is high_pitch.wav; sound_left is low_pitch.wav.
+        show_pitch_familiarization(sound_right, sound_left)
 
     run_practice_gate()
 

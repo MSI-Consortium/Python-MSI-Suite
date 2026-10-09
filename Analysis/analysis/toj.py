@@ -124,8 +124,11 @@ def analyze_toj(
 
         r_squared = 1 - (ss_res / ss_tot)
 
-        # JND
-        JND = np.log(3) * slope
+        # Conventional 25%-75% JND for the fitted logistic function.
+        # Logistic scale (slope) is a separate psychometric parameter.
+        SOA_25 = PSS - np.log(3) * slope
+        SOA_75 = PSS + np.log(3) * slope
+        JND = (SOA_75 - SOA_25) / 2
 
         # Fit QC
         TOJ_Fit_OK = (
@@ -139,6 +142,8 @@ def analyze_toj(
         PSS = np.nan
         slope = np.nan
         JND = np.nan
+        SOA_25 = np.nan
+        SOA_75 = np.nan
         r_squared = np.nan
         TOJ_Fit_OK = False
 
@@ -157,6 +162,10 @@ def analyze_toj(
         "PSS_ms": [PSS],
         "Slope": [slope],
         "JND_ms": [JND],
+        "JND_25_75_ms": [JND],
+        "Logistic_Scale_ms": [slope],
+        "SOA_25_ms": [SOA_25],
+        "SOA_75_ms": [SOA_75],
         "R2": [r_squared],
         "TOJ_Fit_OK": [TOJ_Fit_OK],
         "TOJ_Catch_Trials": [toj_catch_trials],
@@ -279,6 +288,10 @@ def analyze_toj(
         "TOJ_PSS_ms": PSS,
         "TOJ_Slope": slope,
         "TOJ_JND_ms": JND,
+        "TOJ_JND_25_75_ms": JND,
+        "TOJ_Logistic_Scale_ms": slope,
+        "TOJ_SOA_25_ms": SOA_25,
+        "TOJ_SOA_75_ms": SOA_75,
         "TOJ_R2": r_squared,
         "TOJ_Fit_OK": TOJ_Fit_OK
     }

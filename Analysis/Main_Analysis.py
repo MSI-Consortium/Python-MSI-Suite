@@ -5,6 +5,7 @@ from tkinter.filedialog import askopenfilenames
 
 from analysis.sj import analyze_sj
 from analysis.toj import analyze_toj
+from analysis.toj_mod import analyze_toj_mod
 from analysis.srt import analyze_srt
 
 ####################################################
@@ -39,6 +40,7 @@ def analyze_participant(
     output_folder="Results",
     run_sj=True,
     run_toj=True,
+    run_toj_mod=True,
     run_srt=True,
 
     # SJ / TOJ QC settings
@@ -67,11 +69,13 @@ def analyze_participant(
     #Separate the 3 data sets
     sj = df[df["Experiment"] == "sj"].copy()
     toj = df[df["Experiment"] == "toj"].copy()
+    toj_mod = df[df["Experiment"] == "toj_mod"].copy()
     srt = df[df["Experiment"] == "srt"].copy()
 
     # Gives the Number of trials Per data set
     print("SJ trials:", len(sj))
     print("TOJ trials:", len(toj))
+    print("TOJ_Mod trials:", len(toj_mod))
     print("SRT trials:", len(srt))
 
     # Extracting Participant Information
@@ -141,6 +145,26 @@ def analyze_participant(
         toj_results = {}
 
     # ==================================================
+    # TOJ_Mod Analysis
+    # ==================================================
+
+    toj_mod_available = not toj_mod.empty
+
+    if run_toj_mod and toj_mod_available:
+        toj_mod_results = analyze_toj_mod(
+            toj_mod, participant_folder,
+            min_r2=min_r2,
+            max_slope_ms=max_slope_ms,
+            min_response_proportion=min_response_proportion,
+            max_response_proportion=max_response_proportion
+        )
+    elif run_toj_mod and not toj_mod_available:
+        print("TOJ_Mod selected, but no TOJ_Mod trials were found. Skipping TOJ_Mod analysis.")
+        toj_mod_results = {}
+    else:
+        toj_mod_results = {}
+
+    # ==================================================
     # SRT Analysis
     # ==================================================
 
@@ -197,6 +221,10 @@ def analyze_participant(
             toj_results["TOJ_Catch_OK"]
         ])
 
+    # Only include TOJ_Mod QC if selected and available
+    if run_toj_mod and toj_mod_available:
+        qc_checks.append(toj_mod_results["TOJ_Mod_QC_OK"])
+
     # Only include SRT QC if SRT was selected
     # AND this participant actually had SRT trials.
     if run_srt and srt_available:
@@ -235,6 +263,7 @@ def analyze_participant(
 
         **sj_results,
         **toj_results,
+        **toj_mod_results,
         **srt_results,
     }
 
@@ -248,6 +277,7 @@ def analyze_files(
     output_folder="Results",
     run_sj=True,
     run_toj=True,
+    run_toj_mod=True,
     run_srt=True,
     progress_callback=None,
 
@@ -300,6 +330,7 @@ def analyze_files(
 
             run_sj=run_sj,
             run_toj=run_toj,
+            run_toj_mod=run_toj_mod,
             run_srt=run_srt,
 
             min_response_proportion=min_response_proportion,

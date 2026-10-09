@@ -1,5 +1,6 @@
 import os
 import sys
+import pandas as pd
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,6 +48,7 @@ class AnalysisWorker(QObject):
         output_folder,
         run_sj,
         run_toj,
+        run_toj_mod,
         run_srt,
         qc_settings
     ):
@@ -57,6 +59,7 @@ class AnalysisWorker(QObject):
 
         self.run_sj = run_sj
         self.run_toj = run_toj
+        self.run_toj_mod = run_toj_mod
         self.run_srt = run_srt
 
         # Store QC settings
@@ -71,6 +74,7 @@ class AnalysisWorker(QObject):
                 output_folder=self.output_folder,
                 run_sj=self.run_sj,
                 run_toj=self.run_toj,
+                run_toj_mod=self.run_toj_mod,
                 run_srt=self.run_srt,
                 progress_callback=self.report_progress,
                 **self.qc_settings
@@ -625,6 +629,10 @@ class MSIAnalysisGUI(QWidget):
             "Temporal Order Judgment (TOJ)"
         )
 
+        self.toj_mod_checkbox = QCheckBox(
+            "Modified Temporal Order Judgment (TOJ_Mod)"
+        )
+
         self.srt_checkbox = QCheckBox(
             "Simple Reaction Time (SRT)"
         )
@@ -632,6 +640,7 @@ class MSIAnalysisGUI(QWidget):
         # Select all analyses by default
         self.sj_checkbox.setChecked(True)
         self.toj_checkbox.setChecked(True)
+        self.toj_mod_checkbox.setChecked(True)
         self.srt_checkbox.setChecked(True)
 
         control_layout.addWidget(
@@ -640,6 +649,10 @@ class MSIAnalysisGUI(QWidget):
 
         control_layout.addWidget(
             self.toj_checkbox
+        )
+
+        control_layout.addWidget(
+            self.toj_mod_checkbox
         )
 
         control_layout.addWidget(
@@ -887,12 +900,13 @@ class MSIAnalysisGUI(QWidget):
         self.results_table.setMinimumHeight(250)
         self.results_table.setMaximumHeight(350)
 
-        self.results_table.setColumnCount(5)
+        self.results_table.setColumnCount(6)
 
         self.results_table.setHorizontalHeaderLabels([
             "Participant",
             "SJ",
             "TOJ",
+            "TOJ_Mod",
             "SRT",
             "Overall"
         ])
@@ -1219,6 +1233,7 @@ class MSIAnalysisGUI(QWidget):
 
         run_sj = self.sj_checkbox.isChecked()
         run_toj = self.toj_checkbox.isChecked()
+        run_toj_mod = self.toj_mod_checkbox.isChecked()
         run_srt = self.srt_checkbox.isChecked()
 
         qc_settings = {
@@ -1258,6 +1273,7 @@ class MSIAnalysisGUI(QWidget):
         if not any([
             run_sj,
             run_toj,
+            run_toj_mod,
             run_srt
         ]):
             QMessageBox.warning(
@@ -1288,6 +1304,7 @@ class MSIAnalysisGUI(QWidget):
             self.output_folder,
             run_sj,
             run_toj,
+            run_toj_mod,
             run_srt,
             qc_settings
         )
@@ -1449,6 +1466,13 @@ class MSIAnalysisGUI(QWidget):
                 "TOJ_Fitted.png",
                 "TOJ Fitted"
             ),
+
+            ("TOJ_Mod_Visual_Raw.png", "TOJ_Mod Visual Raw"),
+            ("TOJ_Mod_Visual_Fitted.png", "TOJ_Mod Visual Fitted"),
+            ("TOJ_Mod_Auditory_Raw.png", "TOJ_Mod Auditory Raw"),
+            ("TOJ_Mod_Auditory_Fitted.png", "TOJ_Mod Auditory Fitted"),
+            ("TOJ_Mod_Audiovisual_Raw.png", "TOJ_Mod Audiovisual Raw"),
+            ("TOJ_Mod_Audiovisual_Fitted.png", "TOJ_Mod Audiovisual Fitted"),
 
             (
                 "SRT_Histogram.png",
@@ -1649,7 +1673,7 @@ class MSIAnalysisGUI(QWidget):
             )
 
             # SJ QC
-            if "SJ_Fit_OK" in results.columns:
+            if pd.notna(row.get("SJ_Fit_OK")):
 
                 sj_ok = (
                         bool(row["SJ_Fit_OK"])
@@ -1669,7 +1693,7 @@ class MSIAnalysisGUI(QWidget):
                 sj_status = "Not Run"
 
             # TOJ QC
-            if "TOJ_Fit_OK" in results.columns:
+            if pd.notna(row.get("TOJ_Fit_OK")):
 
                 toj_ok = (
                     bool(row["TOJ_Fit_OK"])
@@ -1689,8 +1713,14 @@ class MSIAnalysisGUI(QWidget):
 
                 toj_status = "Not Run"
 
+            # TOJ_Mod QC
+            if "TOJ_Mod_QC_OK" in results.columns and pd.notna(row.get("TOJ_Mod_QC_OK")):
+                toj_mod_status = "PASS" if bool(row["TOJ_Mod_QC_OK"]) else "REVIEW"
+            else:
+                toj_mod_status = "Not Run"
+
             # SRT QC
-            if "SRT_QC_OK" in results.columns:
+            if pd.notna(row.get("SRT_QC_OK")):
 
                 srt_status = (
                     "PASS"
@@ -1705,9 +1735,7 @@ class MSIAnalysisGUI(QWidget):
             # Overall QC
             overall_status = (
                 "PASS"
-                if bool(
-                    row["Participant_OK"]
-                )
+                if row.get("Participant_OK") is True
                 else "REVIEW"
             )
 
@@ -1728,9 +1756,11 @@ class MSIAnalysisGUI(QWidget):
                 )
             )
 
+            self.results_table.setItem(row_index, 3, QTableWidgetItem(toj_mod_status))
+
             self.results_table.setItem(
                 row_index,
-                3,
+                4,
                 QTableWidgetItem(
                     srt_status
                 )
@@ -1738,7 +1768,7 @@ class MSIAnalysisGUI(QWidget):
 
             self.results_table.setItem(
                 row_index,
-                4,
+                5,
                 QTableWidgetItem(
                     overall_status
                 )
@@ -1969,10 +1999,35 @@ class MSIAnalysisGUI(QWidget):
                 title = "TOJ Quality Control"
 
         # --------------------------------
-        # SRT column
+        # TOJ_Mod column
         # --------------------------------
 
         elif column == 3:
+            if "TOJ_Mod_QC_OK" not in self.current_results.columns or pd.isna(participant.get("TOJ_Mod_QC_OK")):
+                message = "TOJ_Mod analysis was not run."
+            else:
+                status = "PASS" if bool(participant["TOJ_Mod_QC_OK"]) else "REVIEW"
+                lines = [f"Participant {participant_id} - TOJ_Mod QC", "", f"Overall TOJ_Mod QC: {status}", ""]
+                for modality in ("Visual", "Auditory", "Audiovisual"):
+                    key = f"TOJ_Mod_{modality}_R2"
+                    if key in self.current_results.columns and pd.notna(participant.get(key)):
+                        lines.extend([
+                            f"{modality}:",
+                            f"  R²: {participant.get(key):.3f}",
+                            f"  PSS: {participant.get(f'TOJ_Mod_{modality}_PSS_ms'):.2f} ms",
+                            f"  JND 25-75: {participant.get(f'TOJ_Mod_{modality}_JND_ms'):.2f} ms",
+                            f"  Catch: {int(participant.get(f'TOJ_Mod_{modality}_Catch_Correct', 0))}/{int(participant.get(f'TOJ_Mod_{modality}_Catch_Trials', 0))}",
+                            f"  QC: {'PASS' if bool(participant.get(f'TOJ_Mod_{modality}_QC_OK', False)) else 'REVIEW'}",
+                            ""
+                        ])
+                message = "\n".join(lines)
+            title = "TOJ_Mod Quality Control"
+
+        # --------------------------------
+        # SRT column
+        # --------------------------------
+
+        elif column == 4:
 
             if "SRT_QC_OK" not in self.current_results.columns:
 
@@ -2139,7 +2194,7 @@ class MSIAnalysisGUI(QWidget):
         # Overall column
         # --------------------------------
 
-        elif column == 4:
+        elif column == 5:
 
             overall_status = (
                 "PASS"
@@ -2152,7 +2207,7 @@ class MSIAnalysisGUI(QWidget):
             message = (
                 f"Participant {participant_id}\n\n"
                 f"Overall QC: {overall_status}\n\n"
-                "Click the SJ, TOJ, or SRT columns "
+                "Click the SJ, TOJ, TOJ_Mod, or SRT columns "
                 "to see individual QC details."
             )
 
